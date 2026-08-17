@@ -16,9 +16,48 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Baza (Neon + Drizzle)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Aplikacija bere in piše izključno v Postgres. Pred prvim zagonom skopiraj `.env.example` v
+`.env.local` in izpolni `DATABASE_URL`, `AUTH_SECRET` in `SEED_PASSWORD`, nato:
+
+```bash
+pnpm db:migrate   # uveljavi migracije iz drizzle/
+pnpm db:seed      # napolni projekt "Hiša Podutik" (idempotentno)
+pnpm db:reset     # izprazni VSE tabele in na novo napolni
+```
+
+`pnpm db:generate` ustvari novo migracijo po spremembi `src/db/schema.ts`.
+Poizvedbe so v `src/db/queries.ts`, mutacije (server actions) v `src/app/actions.ts`.
+Faze na strani `/timeline` dodajaš, urejaš in odstranjuješ v aplikaciji — seed ustvari samo
+izhodiščne štiri. Skupni napredek projekta je povprečje napredka vseh faz.
+
+### Produkcija
+
+Povezavo do produkcijske baze nastavi kot `PROD_DATABASE_URL` v `.env.local` (nikoli v repozitorij):
+
+```bash
+pnpm db:migrate:prod                          # migracije na produkciji
+PROD_RESET_CONFIRM=1 pnpm db:reset:prod       # izprazni in na novo napolni produkcijo
+```
+
+Brez `PROD_RESET_CONFIRM` se izpraznitev zavrne — varovalka pred nesrečnim brisanjem.
+
+## Prijava
+
+Prijava je lastna: geslo je v bazi kot scrypt hash (`users.password_hash`), seja pa je podpisan
+HttpOnly piškotek (HMAC z `AUTH_SECRET`, veljavnost 14 dni). `src/proxy.ts` preusmeri vsak
+neprijavljen obisk na `/login`; identiteto strani dobijo prek `getSessionUser()`.
+
+Seed ustvari tri uporabnike z geslom iz `SEED_PASSWORD`:
+
+| Ime | E-naslov | Vloga |
+| --- | --- | --- |
+| Mitja Pak | mitja@bajton.si | Lastnik projekta |
+| Julija Pak | julija@bajton.si | Investitorka |
+| Darinka Pak | darinka@bajton.si | Investitorka |
+
+Gesla zamenjaj po prvi prijavi; `SEED_PASSWORD` je samo začetno geslo za zasejane račune.
 
 ## Learn More
 
