@@ -78,9 +78,17 @@ export const expenses = pgTable("expenses", {
   ...auditColumns,
 }, (table) => [index("expenses_project_date_idx").on(table.projectId, table.invoiceDate), index("expenses_project_status_idx").on(table.projectId, table.status)]);
 
+/**
+ * Priloga je namenoma neodvisna od vrstnega reda: račun se lahko naloži pred
+ * shranjevanjem stroška (expenseId je takrat NULL, veže ga pendingExpenseId ob
+ * `createExpense`) ali kadarkoli kasneje na že obstoječi strošek.
+ * projectId je zato obvezen — dokler expenseId manjka, je edina vez s projektom.
+ */
 export const expenseAttachments = pgTable("expense_attachments", {
   id: uuid("id").primaryKey().defaultRandom(),
-  expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "cascade" }).notNull(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "cascade" }),
+  pendingExpenseId: uuid("pending_expense_id"),
   fileKey: text("file_key").notNull().unique(),
   originalName: text("original_name").notNull(),
   mimeType: text("mime_type").notNull(),
@@ -88,7 +96,10 @@ export const expenseAttachments = pgTable("expense_attachments", {
   uploadedBy: uuid("uploaded_by").references(() => users.id).notNull(),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+}, (table) => [
+  index("expense_attachments_expense_idx").on(table.expenseId),
+  index("expense_attachments_pending_idx").on(table.projectId, table.pendingExpenseId),
+]);
 
 export const payments = pgTable("payments", {
   id: uuid("id").primaryKey().defaultRandom(),

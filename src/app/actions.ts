@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { activityEvents, categories, expenses, payments, projectPhases, tasks, vendors } from "@/db/schema";
+import { activityEvents, categories, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
 import { getProjectContext, type ProjectContext } from "@/db/queries";
-import { expenseStatusLabels, formatDueLabel, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
-import type { Task } from "@/lib/types";
+import { expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
+import { getUtApi } from "@/lib/utapi";
+import type { InvoiceAttachment, Task } from "@/lib/types";
 
 export type ExpenseActionState = {
   success: boolean;
@@ -130,6 +131,18 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     updatedBy: context.currentUser.id,
   });
 
+  // Račune, naložene pred shranjevanjem, zdaj vežemo na strošek.
+  const linkedAttachments = await context.db
+    .update(expenseAttachments)
+    .set({ expenseId, pendingExpenseId: null })
+    .where(and(
+      eq(expenseAttachments.projectId, context.project.id),
+      eq(expenseAttachments.pendingExpenseId, expenseId),
+      isNull(expenseAttachments.expenseId),
+      isNull(expenseAttachments.deletedAt),
+    ))
+    .returning({ name: expenseAttachments.originalName });
+
   if (status === "paid") {
     await context.db.insert(payments).values({
       expenseId,
@@ -147,8 +160,134 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     afterData: { vendor, amount, status: expenseStatusLabels[status] },
   });
 
+  if (linkedAttachments.length) {
+    await logActivity(context, {
+      entityType: "expense",
+      entityId: expenseId,
+      action: "uploaded",
+      afterData: { files: linkedAttachments.map((attachment) => attachment.name) },
+    });
+  }
+
   revalidateProject();
   return { success: true, message: "Strošek je shranjen.", revision: previousState.revision + 1 };
+}
+
+/**
+ * Osveži strani po uspešnem nalaganju računa. Priloga se zapiše v UploadThing
+ * webhooku (`onUploadComplete`), ki nima dostopa do sejnega konteksta, zato
+ * revalidacijo sproži client, ko je nalaganje končano.
+ */
+export async function refreshAfterInvoiceUpload() {
+  await getProjectContext();
+  revalidateProject();
+}
+
+/**
+ * Priloga, omejena na aktivni projekt. Uporablja se kot skupna avtorizacijska
+ * točka za prenos in brisanje — projekt preverimo tu, ne pri klicatelju.
+ */
+async function findAttachment(context: ProjectContext, attachmentId: string) {
+  const [attachment] = await context.db
+    .select({
+      id: expenseAttachments.id,
+      fileKey: expenseAttachments.fileKey,
+      originalName: expenseAttachments.originalName,
+      expenseId: expenseAttachments.expenseId,
+    })
+    .from(expenseAttachments)
+    .where(and(
+      eq(expenseAttachments.id, attachmentId),
+      eq(expenseAttachments.projectId, context.project.id),
+      isNull(expenseAttachments.deletedAt),
+    ))
+    .limit(1);
+  return attachment ?? null;
+}
+
+export async function listInvoiceAttachments(expenseId: string): Promise<InvoiceAttachment[]> {
+  const parsedId = z.string().uuid().safeParse(expenseId);
+  if (!parsedId.success) return [];
+
+  const context = await getProjectContext();
+  const rows = await context.db
+    .select({
+      id: expenseAttachments.id,
+      name: expenseAttachments.originalName,
+      fileSize: expenseAttachments.fileSize,
+      uploadedAt: expenseAttachments.uploadedAt,
+      uploaderName: users.name,
+    })
+    .from(expenseAttachments)
+    .leftJoin(users, eq(expenseAttachments.uploadedBy, users.id))
+    .where(and(
+      eq(expenseAttachments.projectId, context.project.id),
+      eq(expenseAttachments.expenseId, parsedId.data),
+      isNull(expenseAttachments.deletedAt),
+    ))
+    .orderBy(desc(expenseAttachments.uploadedAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    sizeLabel: formatFileSize(row.fileSize),
+    uploadedAt: formatShortDate(row.uploadedAt),
+    uploadedBy: initialsOf(row.uploaderName ?? "?"),
+  }));
+}
+
+/**
+ * Podpisan URL za zasebno datoteko. URL je kratkotrajen, zato ga ne shranjujemo
+ * in ga generiramo ob vsakem prenosu.
+ */
+export async function getInvoiceDownloadUrl(attachmentId: string) {
+  const parsedId = z.string().uuid().safeParse(attachmentId);
+  if (!parsedId.success) return { success: false, message: "Priloga ne obstaja." } as const;
+
+  const context = await getProjectContext();
+  const attachment = await findAttachment(context, parsedId.data);
+  if (!attachment) return { success: false, message: "Priloga ne obstaja." } as const;
+
+  try {
+    const { ufsUrl } = await getUtApi().generateSignedURL(attachment.fileKey);
+    return { success: true, url: ufsUrl, name: attachment.originalName } as const;
+  } catch {
+    return { success: false, message: "Povezave do datoteke ni bilo mogoče pripraviti." } as const;
+  }
+}
+
+export async function deleteInvoiceAttachment(attachmentId: string) {
+  const parsedId = z.string().uuid().safeParse(attachmentId);
+  if (!parsedId.success) return { success: false, message: "Priloge ni bilo mogoče odstraniti." } as const;
+
+  const context = await getProjectContext();
+  const attachment = await findAttachment(context, parsedId.data);
+  if (!attachment) return { success: false, message: "Priloga ne obstaja." } as const;
+
+  // Najprej datoteka v UploadThing: če to spodleti, zapis pustimo pri miru,
+  // da priloga ne izgine iz aplikacije, medtem ko datoteka ostane v hrambi.
+  try {
+    await getUtApi().deleteFiles([attachment.fileKey]);
+  } catch {
+    return { success: false, message: "Datoteke ni bilo mogoče izbrisati iz hrambe." } as const;
+  }
+
+  await context.db
+    .update(expenseAttachments)
+    .set({ deletedAt: new Date() })
+    .where(eq(expenseAttachments.id, attachment.id));
+
+  if (attachment.expenseId) {
+    await logActivity(context, {
+      entityType: "expense",
+      entityId: attachment.expenseId,
+      action: "deleted",
+      beforeData: { file: attachment.originalName },
+    });
+  }
+
+  revalidateProject();
+  return { success: true, message: "Račun je odstranjen." } as const;
 }
 
 const taskSchema = z.object({

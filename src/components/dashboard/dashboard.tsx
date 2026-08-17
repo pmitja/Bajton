@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddExpenseSheet } from "./add-expense-sheet";
 import { TaskList } from "./task-list";
 import type { DashboardData, MonthlySpending } from "@/lib/types";
@@ -72,7 +73,34 @@ export function Dashboard({ data }: { data: DashboardData }) {
           <div className="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
             <section className="overflow-hidden rounded-2xl border bg-card shadow-sm" aria-labelledby="expenses-title">
               <div className="flex items-center justify-between border-b px-5 py-4"><div><h2 id="expenses-title" className="font-semibold tracking-tight">Zadnji stroški</h2><p className="mt-0.5 text-sm text-muted-foreground">Prikazano {euro.format(shownExpenses)}</p></div><Button render={<Link href="/expenses" />} nativeButton={false} variant="ghost" size="sm" className="text-primary">Vsi stroški</Button></div>
-              <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-sm"><thead><tr className="border-b bg-muted/35 text-left text-xs text-muted-foreground"><th className="px-5 py-3 font-medium">Dobavitelj</th><th className="px-4 py-3 font-medium">Kategorija</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 text-right font-medium">Znesek</th></tr></thead><tbody>{recentExpenses.map((expense) => <tr key={expense.id} className="border-b last:border-0 hover:bg-muted/35"><td className="px-5 py-3.5"><div className="flex items-center gap-3"><Avatar className="size-8"><AvatarFallback className="bg-secondary text-[10px]">{expense.initials}</AvatarFallback></Avatar><div><p className="font-medium">{expense.vendor}</p><p className="text-xs text-muted-foreground">{expense.date} · dodal {expense.initials}</p></div></div></td><td className="px-4 py-3.5 text-muted-foreground">{expense.category}</td><td className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></td><td className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</td></tr>)}</tbody></table></div>
+              <Table className="min-w-[620px]">
+                <TableHeader>
+                  <TableRow className="bg-muted/35 text-xs text-muted-foreground hover:bg-muted/35">
+                    <TableHead className="h-auto px-5 py-3 text-muted-foreground">Dobavitelj</TableHead>
+                    <TableHead className="h-auto px-4 py-3 text-muted-foreground">Kategorija</TableHead>
+                    <TableHead className="h-auto px-4 py-3 text-muted-foreground">Status</TableHead>
+                    <TableHead className="h-auto px-4 py-3 text-right text-muted-foreground">Znesek</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentExpenses.map((expense) => (
+                    <TableRow key={expense.id} className="hover:bg-muted/35">
+                      <TableCell className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="size-8"><AvatarFallback className="bg-secondary text-[10px]">{expense.initials}</AvatarFallback></Avatar>
+                          <div>
+                            <p className="font-medium">{expense.vendor}</p>
+                            <p className="text-xs text-muted-foreground">{expense.date} · dodal {expense.initials}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-4 py-3.5 text-muted-foreground">{expense.category}</TableCell>
+                      <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
+                      <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </section>
 
             <section className="rounded-2xl border bg-card p-5 shadow-sm" aria-labelledby="progress-title"><div className="flex items-start justify-between"><div><h2 id="progress-title" className="font-semibold tracking-tight">Napredek gradnje</h2><p className="mt-1 text-sm text-muted-foreground">Faza {activePhaseIndex + 1} od {phases.length}</p></div><span className="text-2xl font-bold text-primary">{project.progress} %</span></div><Progress value={project.progress} className="mt-4 h-2" /><div className="mt-6 space-y-5">{phases.map((phase, index) => <div key={phase.id} className="relative flex gap-3"><div className="flex flex-col items-center"><span className={`mt-0.5 size-3 rounded-full border-2 ${phase.status === "done" ? "border-emerald-600 bg-emerald-600" : phase.status === "active" ? "border-primary bg-primary" : "border-border bg-card"}`} />{index < phases.length - 1 ? <span className="mt-1 h-9 w-px bg-border" /> : null}</div><div className="-mt-0.5 flex flex-1 justify-between gap-4"><p className={`text-sm font-medium ${phase.status === "next" ? "text-muted-foreground" : ""}`}>{phase.name}</p><p className="text-xs text-muted-foreground">{phase.date}</p></div></div>)}</div></section>

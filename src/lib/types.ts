@@ -48,6 +48,15 @@ export type Expense = {
   date: string;
   status: string;
   initials: string;
+  attachmentCount: number;
+};
+
+export type InvoiceAttachment = {
+  id: string;
+  name: string;
+  sizeLabel: string;
+  uploadedAt: string;
+  uploadedBy: string;
 };
 
 export type PhaseItem = {

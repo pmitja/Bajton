@@ -8,6 +8,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Task } from "@/lib/types";
 import { createTask, deleteTask as deleteTaskAction, toggleTask as toggleTaskAction } from "@/app/actions";
@@ -24,6 +27,8 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">("all");
+  // Ključ obrazca; ob uspešnem dodajanju ponastavi izbirnik datuma.
+  const [formKey, setFormKey] = useState(0);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -73,6 +78,7 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
         setQuery("");
         setStatusFilter("all");
         form.reset();
+        setFormKey((current) => current + 1);
         setItems((current) => [result.task, ...current]);
         setMessage("Opravilo je dodano.");
         router.refresh();
@@ -116,7 +122,7 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
         </div>
         {showAllLink ? <Button render={<Link href="/tasks" />} nativeButton={false} variant="ghost" size="sm" className="text-primary">Prikaži vsa</Button> : null}
       </div>
-      {full ? <div className="grid gap-3 border-b p-4 sm:grid-cols-2"><div className="relative"><Search className="absolute left-3.5 top-3.5 size-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Išči opravila …" aria-label="Išči opravila" className="h-11 bg-background pl-10" /></div><div className="flex gap-1 rounded-xl bg-muted p-1">{[{ value: "all", label: "Vsa" }, { value: "open", label: "Odprta" }, { value: "done", label: "Končana" }].map((filter) => <button key={filter.value} type="button" onClick={() => setStatusFilter(filter.value as "all" | "open" | "done")} aria-pressed={statusFilter === filter.value} className={`min-h-9 flex-1 rounded-lg px-3 text-sm font-medium transition-colors ${statusFilter === filter.value ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{filter.label}</button>)}</div></div> : null}
+      {full ? <div className="grid gap-3 border-b p-4 sm:grid-cols-2"><div className="relative"><Search className="absolute left-3.5 top-3.5 size-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Išči opravila …" aria-label="Išči opravila" className="h-11 bg-background pl-10" /></div><ToggleGroup aria-label="Filter opravil" spacing={0} value={[statusFilter]} onValueChange={(next) => setStatusFilter((current) => (next[0] as "all" | "open" | "done" | undefined) ?? current)} className="w-full bg-muted p-1">{[{ value: "all", label: "Vsa" }, { value: "open", label: "Odprta" }, { value: "done", label: "Končana" }].map((filter) => <ToggleGroupItem key={filter.value} value={filter.value} size="lg" className="flex-1 px-3 aria-pressed:bg-card aria-pressed:text-foreground aria-pressed:shadow-sm">{filter.label}</ToggleGroupItem>)}</ToggleGroup></div> : null}
       {full ? <div className="grid grid-cols-2 gap-3 border-b p-4"><div className="flex items-center gap-3 rounded-xl bg-muted/45 p-4"><CircleDashed className="size-5 text-primary" /><div><p className="text-xl font-bold">{openCount}</p><p className="text-xs text-muted-foreground">Odprta</p></div></div><div className="flex items-center gap-3 rounded-xl bg-muted/45 p-4"><CheckCircle2 className="size-5 text-emerald-600" /><div><p className="text-xl font-bold">{items.length - openCount}</p><p className="text-xs text-muted-foreground">Končana</p></div></div></div> : null}
       <form className={`border-b p-4 ${full ? "grid gap-3 sm:grid-cols-[minmax(0,1fr)_10.5rem_9rem_auto]" : "flex gap-2"}`} onSubmit={(event) => { event.preventDefault(); const formData = new FormData(event.currentTarget); addTask({ title: String(formData.get("title") ?? ""), dueDate: String(formData.get("dueDate") ?? ""), priority: (formData.get("priority") ?? "srednja") as Task["priority"] }, event.currentTarget); }}>
         <Input
@@ -128,7 +134,7 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
           className="h-11 bg-background"
           disabled={pending}
         />
-        {full ? <><div><label className="sr-only" htmlFor="task-due-date">Rok opravila</label><Input id="task-due-date" name="dueDate" type="date" aria-label="Rok opravila" className="h-11 bg-background" disabled={pending} /></div><div><label className="sr-only" htmlFor="task-priority">Prioriteta</label><select id="task-priority" name="priority" defaultValue="srednja" aria-label="Prioriteta" className="min-h-11 w-full rounded-lg border bg-background px-3 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50" disabled={pending}><option value="nizka">Nizka</option><option value="srednja">Srednja</option><option value="visoka">Visoka</option></select></div></> : null}
+        {full ? <><div><DatePicker key={formKey} id="task-due-date" name="dueDate" placeholder="Rok opravila" aria-label="Rok opravila" className="h-11 bg-background" disabled={pending} /></div><div><Select name="priority" defaultValue="srednja" disabled={pending} itemToStringLabel={(value) => ({ nizka: "Nizka", srednja: "Srednja", visoka: "Visoka" })[value] ?? value}><SelectTrigger id="task-priority" aria-label="Prioriteta" className="h-11 w-full bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="nizka">Nizka</SelectItem><SelectItem value="srednja">Srednja</SelectItem><SelectItem value="visoka">Visoka</SelectItem></SelectContent></Select></div></> : null}
         <Button type="submit" size={full ? "lg" : "icon"} className={full ? "h-11 shrink-0 px-4" : "size-11 shrink-0"} aria-label="Dodaj opravilo" disabled={pending || draft.trim().length < 2}>
           <Plus className="size-4" />{full ? <span>Dodaj</span> : null}
         </Button>

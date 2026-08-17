@@ -86,6 +86,7 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
       invoiceDate: expenses.invoiceDate,
       createdAt: expenses.createdAt,
       authorName: users.name,
+      attachmentCount: sql<number>`(select count(*)::int from ${expenseAttachments} a where a.expense_id = ${expenses.id} and a.deleted_at is null)`,
     })
     .from(expenses)
     .leftJoin(vendors, eq(expenses.vendorId, vendors.id))
@@ -102,6 +103,7 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
     date: formatShortDate(row.invoiceDate ?? row.createdAt),
     status: expenseStatusLabels[row.status],
     initials: initialsOf(row.authorName ?? "?"),
+    attachmentCount: row.attachmentCount,
   }));
 }
 
@@ -356,16 +358,20 @@ export async function getDocuments(): Promise<ProjectDocument[]> {
       ownerName: users.name,
     })
     .from(expenseAttachments)
-    .innerJoin(expenses, eq(expenseAttachments.expenseId, expenses.id))
+    .leftJoin(expenses, and(eq(expenseAttachments.expenseId, expenses.id), isNull(expenses.deletedAt)))
     .innerJoin(users, eq(expenseAttachments.uploadedBy, users.id))
-    .where(and(eq(expenses.projectId, project.id), isNull(expenseAttachments.deletedAt)))
+    .where(and(eq(expenseAttachments.projectId, project.id), isNull(expenseAttachments.deletedAt)))
     .orderBy(desc(expenseAttachments.uploadedAt));
 
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
     type: fileTypeLabel(row.mimeType, row.name),
-    status: row.expenseStatus === "paid" || row.expenseStatus === "approved" ? "Potrjeno" : "V pregledu",
+    status: row.expenseStatus === null
+      ? "Brez stroška"
+      : row.expenseStatus === "paid" || row.expenseStatus === "approved"
+        ? "Potrjeno"
+        : "V pregledu",
     updated: formatShortDate(row.uploadedAt),
     owner: initialsOf(row.ownerName),
   }));

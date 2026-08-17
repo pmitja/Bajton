@@ -35,6 +35,9 @@ dependencies:
   react:
     specifier: 19.2.8
     version: 19.2.8
+  react-day-picker:
+    specifier: ^10.0.1
+    version: 10.0.1(@types/react@19.2.18)(react@19.2.8)
   react-dom:
     specifier: 19.2.8
     version: 19.2.8(react@19.2.8)
@@ -411,6 +414,10 @@ packages:
       react-dom: 19.2.8(react@19.2.8)
       reselect: 5.2.0
       use-sync-external-store: 1.6.0(react@19.2.8)
+    dev: false
+
+  /@date-fns/tz@1.5.0:
+    resolution: {integrity: sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==}
     dev: false
 
   /@dotenvx/dotenvx@1.75.1:
@@ -5454,6 +5461,22 @@ packages:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       unpipe: 1.0.0
+    dev: false
+
+  /react-day-picker@10.0.1(@types/react@19.2.18)(react@19.2.8):
+    resolution: {integrity: sha512-eNh6BlwcYInWaJtRv18mXQ06Ys/H6rdTZAnTaSdOYJuTpwP1JMCHNd1FDRadA+gbeinq+psdULN5Xnowy9mV8w==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/react': '>=16.8.0'
+      react: '>=16.8.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+    dependencies:
+      '@date-fns/tz': 1.5.0
+      '@types/react': 19.2.18
+      date-fns: 4.4.0
+      react: 19.2.8
     dev: false
 
   /react-dom@19.2.8(react@19.2.8):

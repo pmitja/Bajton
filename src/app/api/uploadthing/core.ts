@@ -4,7 +4,7 @@ import { UploadThingError } from "uploadthing/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/auth";
-import { expenseAttachments, expenses } from "@/db/schema";
+import { activityEvents, expenseAttachments, expenses, projectMembers } from "@/db/schema";
 
 const f = createUploadthing();
 
@@ -19,33 +19,58 @@ export const ourFileRouter = {
       if (!sessionUser) throw new UploadThingError("Za nalaganje moraš biti prijavljen.");
 
       const db = getDb();
+      const [membership] = await db
+        .select({ userId: projectMembers.userId })
+        .from(projectMembers)
+        .where(and(eq(projectMembers.projectId, input.projectId), eq(projectMembers.userId, sessionUser.id)))
+        .limit(1);
+      if (!membership) throw new UploadThingError("Do tega projekta nimaš dostopa.");
+
       const [expense] = await db
         .select({ id: expenses.id })
         .from(expenses)
         .where(and(eq(expenses.id, input.expenseId), eq(expenses.projectId, input.projectId), isNull(expenses.deletedAt)))
         .limit(1);
 
-      // Račun se lahko naloži pred shranjevanjem stroška; takrat priloge še ne moremo vezati.
+      // Račun se lahko naloži pred shranjevanjem stroška. Takrat expense še ne
+      // obstaja; prilogo shranimo kot čakajočo in jo `createExpense` poveže po
+      // istem UUID-ju. Če expense obstaja, gre za naknadno dodan račun.
       return {
         userId: sessionUser.id,
-        expenseId: expense ? expense.id : null,
         projectId: input.projectId,
+        expenseId: expense?.id ?? null,
+        pendingExpenseId: expense ? null : input.expenseId,
       };
     })
     .onUploadComplete(async ({ metadata, file }) => {
       // Keep file.key: it is required for private signed URLs and deletion.
-      if (metadata.expenseId) {
-        await getDb()
-          .insert(expenseAttachments)
-          .values({
-            expenseId: metadata.expenseId,
-            fileKey: file.key,
-            originalName: file.name,
-            mimeType: file.type,
-            fileSize: file.size,
-            uploadedBy: metadata.userId,
-          })
-          .onConflictDoNothing({ target: expenseAttachments.fileKey });
+      const db = getDb();
+      const [inserted] = await db
+        .insert(expenseAttachments)
+        .values({
+          projectId: metadata.projectId,
+          expenseId: metadata.expenseId,
+          pendingExpenseId: metadata.pendingExpenseId,
+          fileKey: file.key,
+          originalName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          uploadedBy: metadata.userId,
+        })
+        .onConflictDoNothing({ target: expenseAttachments.fileKey })
+        .returning({ id: expenseAttachments.id });
+
+      // Naknadno dodan račun zabeležimo takoj; priloge pred shranjevanjem
+      // stroška zabeleži `createExpense`, ko jih poveže.
+      if (inserted && metadata.expenseId) {
+        await db.insert(activityEvents).values({
+          projectId: metadata.projectId,
+          actorId: metadata.userId,
+          entityType: "expense",
+          entityId: metadata.expenseId,
+          action: "uploaded",
+          afterData: { file: file.name },
+        });
       }
 
       return {
