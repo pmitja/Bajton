@@ -6,7 +6,7 @@ import { z } from "zod";
 import { activityEvents, categories, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
 import { getProjectContext, type ProjectContext } from "@/db/queries";
 import { expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
-import { getUtApi } from "@/lib/utapi";
+import { getFileUrl, getUtApi } from "@/lib/utapi";
 import type { InvoiceAttachment, Task } from "@/lib/types";
 
 export type ExpenseActionState = {
@@ -236,10 +236,7 @@ export async function listInvoiceAttachments(expenseId: string): Promise<Invoice
   }));
 }
 
-/**
- * Podpisan URL za zasebno datoteko. URL je kratkotrajen, zato ga ne shranjujemo
- * in ga generiramo ob vsakem prenosu.
- */
+/** URL naložene datoteke. Sestavimo ga ob prenosu iz ključa datoteke. */
 export async function getInvoiceDownloadUrl(attachmentId: string) {
   const parsedId = z.string().uuid().safeParse(attachmentId);
   if (!parsedId.success) return { success: false, message: "Priloga ne obstaja." } as const;
@@ -249,8 +246,7 @@ export async function getInvoiceDownloadUrl(attachmentId: string) {
   if (!attachment) return { success: false, message: "Priloga ne obstaja." } as const;
 
   try {
-    const { ufsUrl } = await getUtApi().generateSignedURL(attachment.fileKey);
-    return { success: true, url: ufsUrl, name: attachment.originalName } as const;
+    return { success: true, url: getFileUrl(attachment.fileKey), name: attachment.originalName } as const;
   } catch {
     return { success: false, message: "Povezave do datoteke ni bilo mogoče pripraviti." } as const;
   }

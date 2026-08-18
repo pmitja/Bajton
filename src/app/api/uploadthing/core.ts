@@ -10,8 +10,10 @@ const f = createUploadthing();
 
 export const ourFileRouter = {
   invoiceAttachment: f({
-    pdf: { maxFileSize: "16MB", maxFileCount: 5, acl: "private" },
-    image: { maxFileSize: "16MB", maxFileCount: 5, acl: "private" },
+    // Brez `acl: "private"`: zasebne datoteke zahtevajo plačljiv UploadThing paket,
+    // brezplačni pa nalaganje zavrne z "Private files are not allowed for free apps".
+    pdf: { maxFileSize: "16MB", maxFileCount: 5 },
+    image: { maxFileSize: "16MB", maxFileCount: 5 },
   })
     .input(z.object({ expenseId: z.string().uuid(), projectId: z.string().uuid() }))
     .middleware(async ({ input }) => {
@@ -43,7 +45,7 @@ export const ourFileRouter = {
       };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      // Keep file.key: it is required for private signed URLs and deletion.
+      // Keep file.key: it is required for building the file URL and for deletion.
       const db = getDb();
       const [inserted] = await db
         .insert(expenseAttachments)
