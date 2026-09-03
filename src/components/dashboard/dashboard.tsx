@@ -9,6 +9,7 @@ import { AddExpenseSheet } from "./add-expense-sheet";
 import { TaskList } from "./task-list";
 import type { DashboardData, MonthlySpending } from "@/lib/types";
 import { AppShell } from "@/components/app-shell";
+import { ExpenseActions } from "@/components/expense-actions";
 
 const euro = new Intl.NumberFormat("sl-SI", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const today = new Intl.DateTimeFormat("sl-SI", { weekday: "long", day: "numeric", month: "long" });
@@ -80,6 +81,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
                     <TableHead className="h-auto px-4 py-3 text-muted-foreground">Kategorija</TableHead>
                     <TableHead className="h-auto px-4 py-3 text-muted-foreground">Status</TableHead>
                     <TableHead className="h-auto px-4 py-3 text-right text-muted-foreground">Znesek</TableHead>
+                    <TableHead className="h-auto w-12 px-3 py-3"><span className="sr-only">Dejanja</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -97,6 +99,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
                       <TableCell className="px-4 py-3.5 text-muted-foreground">{expense.category}</TableCell>
                       <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
                       <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
+                      <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

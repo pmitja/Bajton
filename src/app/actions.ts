@@ -5,7 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { activityEvents, categories, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
 import { getProjectContext, type ProjectContext } from "@/db/queries";
-import { expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
+import { expenseCategoryLabels, expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
 import { getFileUrl, getUtApi } from "@/lib/utapi";
 import type { InvoiceAttachment, Task } from "@/lib/types";
 
@@ -27,13 +27,6 @@ const expenseSchema = z.object({
   status: z.enum(["received", "approved", "paid"]),
   note: z.string().trim().max(500, "Opomba je predolga.").optional(),
 });
-
-const categoryNames = {
-  material: "Material",
-  construction: "Konstrukcija",
-  electrical: "Elektroinštalacije",
-  documentation: "Dokumentacija",
-} as const;
 
 async function findOrCreateCategory({ db, project }: ProjectContext, name: string) {
   const [existing] = await db
@@ -108,7 +101,7 @@ export async function createExpense(previousState: ExpenseActionState, formData:
   const { expenseId, vendor, amount, invoiceDate, category, status, note } = parsed.data;
   const context = await getProjectContext();
   const [categoryId, vendorId] = await Promise.all([
-    findOrCreateCategory(context, categoryNames[category]),
+    findOrCreateCategory(context, expenseCategoryLabels[category]),
     findOrCreateVendor(context, vendor),
   ]);
 
@@ -120,7 +113,7 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     projectId: context.project.id,
     categoryId,
     vendorId,
-    title: `${categoryNames[category]} – ${vendor}`,
+    title: `${expenseCategoryLabels[category]} – ${vendor}`,
     invoiceDate,
     netAmount: net.toFixed(2),
     taxAmount: tax.toFixed(2),
@@ -171,6 +164,108 @@ export async function createExpense(previousState: ExpenseActionState, formData:
 
   revalidateProject();
   return { success: true, message: "Strošek je shranjen.", revision: previousState.revision + 1 };
+}
+
+export type ExpenseInput = Omit<z.input<typeof expenseSchema>, "expenseId">;
+
+export async function updateExpense(expenseId: string, input: ExpenseInput) {
+  const parsedId = z.string().uuid().safeParse(expenseId);
+  const parsed = expenseSchema.omit({ expenseId: true }).safeParse(input);
+  if (!parsedId.success) return { success: false, message: "Stroška ni bilo mogoče posodobiti." } as const;
+  if (!parsed.success) return { success: false, message: "Preveri vnesene podatke." } as const;
+
+  const context = await getProjectContext();
+  const [expense] = await context.db
+    .select({
+      id: expenses.id,
+      title: expenses.title,
+      grossAmount: expenses.grossAmount,
+      status: expenses.status,
+      invoiceDate: expenses.invoiceDate,
+    })
+    .from(expenses)
+    .where(and(eq(expenses.id, parsedId.data), eq(expenses.projectId, context.project.id), isNull(expenses.deletedAt)))
+    .limit(1);
+
+  if (!expense) return { success: false, message: "Strošek ne obstaja." } as const;
+
+  const { vendor, amount, invoiceDate, category, status, note } = parsed.data;
+  const [categoryId, vendorId] = await Promise.all([
+    findOrCreateCategory(context, expenseCategoryLabels[category]),
+    findOrCreateVendor(context, vendor),
+  ]);
+  const net = Number((amount / (1 + TAX_RATE)).toFixed(2));
+  const tax = Number((amount - net).toFixed(2));
+
+  await context.db
+    .update(expenses)
+    .set({
+      categoryId,
+      vendorId,
+      title: `${expenseCategoryLabels[category]} – ${vendor}`,
+      invoiceDate,
+      netAmount: net.toFixed(2),
+      taxAmount: tax.toFixed(2),
+      grossAmount: amount.toFixed(2),
+      status,
+      notes: note || null,
+      updatedBy: context.currentUser.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(expenses.id, expense.id));
+
+  if (status === "paid") {
+    await context.db.delete(payments).where(eq(payments.expenseId, expense.id));
+    await context.db.insert(payments).values({
+      expenseId: expense.id,
+      amount: amount.toFixed(2),
+      paidAt: invoiceDate,
+      note: "Usklajeno ob urejanju stroška",
+      createdBy: context.currentUser.id,
+    });
+  } else if (expense.status === "paid") {
+    await context.db.delete(payments).where(eq(payments.expenseId, expense.id));
+  }
+
+  await logActivity(context, {
+    entityType: "expense",
+    entityId: expense.id,
+    action: "updated",
+    beforeData: { title: expense.title, amount: Number(expense.grossAmount), status: expenseStatusLabels[expense.status], invoiceDate: expense.invoiceDate },
+    afterData: { vendor, amount, status: expenseStatusLabels[status], invoiceDate },
+  });
+
+  revalidateProject();
+  return { success: true, message: "Strošek je posodobljen." } as const;
+}
+
+export async function deleteExpense(expenseId: string) {
+  const parsedId = z.string().uuid().safeParse(expenseId);
+  if (!parsedId.success) return { success: false, message: "Stroška ni bilo mogoče odstraniti." } as const;
+
+  const context = await getProjectContext();
+  const [expense] = await context.db
+    .select({ id: expenses.id, title: expenses.title, grossAmount: expenses.grossAmount })
+    .from(expenses)
+    .where(and(eq(expenses.id, parsedId.data), eq(expenses.projectId, context.project.id), isNull(expenses.deletedAt)))
+    .limit(1);
+
+  if (!expense) return { success: false, message: "Strošek ne obstaja." } as const;
+
+  await context.db
+    .update(expenses)
+    .set({ deletedAt: new Date(), updatedAt: new Date(), updatedBy: context.currentUser.id })
+    .where(eq(expenses.id, expense.id));
+
+  await logActivity(context, {
+    entityType: "expense",
+    entityId: expense.id,
+    action: "deleted",
+    afterData: { title: expense.title, amount: Number(expense.grossAmount) },
+  });
+
+  revalidateProject();
+  return { success: true, message: "Strošek je odstranjen." } as const;
 }
 
 /**

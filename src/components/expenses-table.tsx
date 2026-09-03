@@ -1,4 +1,5 @@
 import { AttachInvoiceDialog } from "@/components/attach-invoice-dialog";
+import { ExpenseActions } from "@/components/expense-actions";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -18,6 +19,7 @@ export function ExpensesTable({ expenses, projectId }: { expenses: Expense[]; pr
             <TableHead className="h-auto px-4 py-3 text-muted-foreground">Status</TableHead>
             <TableHead className="h-auto px-4 py-3 text-muted-foreground">Račun</TableHead>
             <TableHead className="h-auto px-4 py-3 text-right text-muted-foreground">Znesek</TableHead>
+            <TableHead className="h-auto w-12 px-3 py-3"><span className="sr-only">Dejanja</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -36,6 +38,7 @@ export function ExpensesTable({ expenses, projectId }: { expenses: Expense[]; pr
               <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
               <TableCell className="px-4 py-3.5"><AttachInvoiceDialog expenseId={expense.id} projectId={projectId} vendor={expense.vendor} attachmentCount={expense.attachmentCount} /></TableCell>
               <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
+              <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} /></TableCell>
             </TableRow>
           ))}
         </TableBody>

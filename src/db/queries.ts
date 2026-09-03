@@ -6,7 +6,7 @@ import { and, asc, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/auth";
 import { activityEvents, categories, expenseAttachments, expenses, payments, projectMembers, projectPhases, projects, tasks, users, vendors } from "@/db/schema";
-import { expenseStatusLabels, formatDueLabel, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
+import { expenseCategoryKey, expenseStatusLabels, formatDueLabel, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
 import type { ActivityItem, Contractor, CurrentUser, DashboardData, Expense, Investor, MonthlySpending, PhaseItem, ProjectDocument, ProjectSummary, SearchEntry, Task } from "@/lib/types";
 
 export type ProjectContext = {
@@ -84,6 +84,7 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
       grossAmount: expenses.grossAmount,
       status: expenses.status,
       invoiceDate: expenses.invoiceDate,
+      notes: expenses.notes,
       createdAt: expenses.createdAt,
       authorName: users.name,
       attachmentCount: sql<number>`(select count(*)::int from ${expenseAttachments} a where a.expense_id = ${expenses.id} and a.deleted_at is null)`,
@@ -99,9 +100,13 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
     id: row.id,
     vendor: row.vendor ?? row.title,
     category: row.category ?? "Nerazporejeno",
+    categoryKey: expenseCategoryKey(row.category),
     amount: toNumber(row.grossAmount),
     date: formatShortDate(row.invoiceDate ?? row.createdAt),
+    invoiceDate: row.invoiceDate ?? row.createdAt.toISOString().slice(0, 10),
     status: expenseStatusLabels[row.status],
+    statusKey: row.status,
+    note: row.notes ?? "",
     initials: initialsOf(row.authorName ?? "?"),
     attachmentCount: row.attachmentCount,
   }));
@@ -166,6 +171,7 @@ function describeEvent(entityType: string, action: string, after: EventPayload) 
   if (entityType === "expense" && action === "created") return `je dodal(a) račun ${label}`;
   if (entityType === "expense" && action === "paid") return `je plačal(a) račun ${label}`;
   if (entityType === "expense" && action === "updated") return `je posodobil(a) račun ${label}`;
+  if (entityType === "expense" && action === "deleted") return `je odstranil(a) strošek ${label}`;
   if (entityType === "task" && action === "created") return `je dodal(a) opravilo ${label}`;
   if (entityType === "task" && action === "completed") return `je zaključil(a) opravilo ${label}`;
   if (entityType === "task" && action === "deleted") return `je odstranil(a) opravilo ${label}`;

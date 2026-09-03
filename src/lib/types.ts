@@ -44,9 +44,13 @@ export type Expense = {
   id: string;
   vendor: string;
   category: string;
+  categoryKey: "material" | "construction" | "electrical" | "documentation";
   amount: number;
   date: string;
+  invoiceDate: string;
   status: string;
+  statusKey: "draft" | "received" | "approved" | "partially_paid" | "paid" | "cancelled";
+  note: string;
   initials: string;
   attachmentCount: number;
 };
