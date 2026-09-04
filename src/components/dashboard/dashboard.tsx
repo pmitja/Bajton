@@ -54,7 +54,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
         <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div><p className="mb-2 text-sm font-medium text-primary">{today.format(new Date()).replace(/^./, (letter) => letter.toLocaleUpperCase("sl"))}</p><h1 className="text-3xl font-bold tracking-[-0.04em] sm:text-4xl">Dobrodošel nazaj, {currentUser.name.split(" ")[0]}.</h1><p className="mt-2 text-muted-foreground">{project.name} je {project.progress} % dokončana. Trenutno je odprtih {openTaskCount} opravil.</p></div>
-            <AddExpenseSheet projectId={project.id} />
+            <AddExpenseSheet projectId={project.id} contractors={data.contractorOptions} />
           </div>
 
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Ključne metrike">
@@ -93,13 +93,14 @@ export function Dashboard({ data }: { data: DashboardData }) {
                           <div>
                             <p className="font-medium">{expense.vendor}</p>
                             <p className="text-xs text-muted-foreground">{expense.date} · dodal {expense.initials}</p>
+                            {expense.contractor ? <p className="text-xs text-muted-foreground">Izvajalec: {expense.contractor}</p> : null}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell className="px-4 py-3.5 text-muted-foreground">{expense.category}</TableCell>
                       <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
                       <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
-                      <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} /></TableCell>
+                      <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} contractors={data.contractorOptions} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

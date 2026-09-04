@@ -12,10 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { createExpense, type ExpenseActionState } from "@/app/actions";
+import { expenseCategorySuggestions } from "@/lib/format";
+import type { ContractorOption } from "@/lib/types";
 
 const initialState: ExpenseActionState = { success: false, message: "", revision: 0 };
 
-export function AddExpenseSheet({ projectId }: { projectId: string }) {
+export function AddExpenseSheet({ projectId, contractors }: { projectId: string; contractors: ContractorOption[] }) {
   const [open, setOpen] = useState(false);
   const [expenseId, setExpenseId] = useState(() => crypto.randomUUID());
   // Datum računa je privzeto današnji dan; ob vsakem novem obrazcu ga osvežimo.
@@ -76,7 +78,8 @@ export function AddExpenseSheet({ projectId }: { projectId: string }) {
             <div className="space-y-2 sm:col-span-2"><Label htmlFor="vendor">Dobavitelj</Label><Input id="vendor" name="vendor" placeholder="npr. Merkur trgovina" required aria-invalid={Boolean(state.errors?.vendor)} />{state.errors?.vendor ? <p className="text-xs text-destructive">{state.errors.vendor[0]}</p> : null}</div>
             <div className="space-y-2"><Label htmlFor="amount">Znesek z DDV</Label><div className="relative"><Input id="amount" name="amount" type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="0,00" className="pr-10" required aria-invalid={Boolean(state.errors?.amount)} /><span className="absolute right-3 top-2.5 text-sm text-muted-foreground">€</span></div>{state.errors?.amount ? <p className="text-xs text-destructive">{state.errors.amount[0]}</p> : null}</div>
             <div className="space-y-2"><Label htmlFor="invoiceDate">Datum računa</Label><DatePicker key={expenseId} id="invoiceDate" name="invoiceDate" defaultValue={today} required aria-invalid={Boolean(state.errors?.invoiceDate)} />{state.errors?.invoiceDate ? <p className="text-xs text-destructive">{state.errors.invoiceDate[0]}</p> : null}</div>
-            <div className="space-y-2"><Label>Kategorija</Label><Select name="category" required><SelectTrigger className="w-full" aria-invalid={Boolean(state.errors?.category)}><SelectValue placeholder="Izberi kategorijo" /></SelectTrigger><SelectContent><SelectItem value="material">Material</SelectItem><SelectItem value="construction">Konstrukcija</SelectItem><SelectItem value="electrical">Elektroinštalacije</SelectItem><SelectItem value="documentation">Dokumentacija</SelectItem></SelectContent></Select>{state.errors?.category ? <p className="text-xs text-destructive">{state.errors.category[0]}</p> : null}</div>
+            <div className="space-y-2"><Label htmlFor="category">Kategorija</Label><Input id="category" name="category" list="expense-category-suggestions" placeholder="npr. Stavbno pohištvo" minLength={2} maxLength={60} required aria-invalid={Boolean(state.errors?.category)} /><datalist id="expense-category-suggestions">{expenseCategorySuggestions.map((category) => <option key={category} value={category} />)}</datalist>{state.errors?.category ? <p className="text-xs text-destructive">{state.errors.category[0]}</p> : <p className="text-xs text-muted-foreground">Izberi predlog ali vpiši svojo kategorijo.</p>}</div>
+            <div className="space-y-2"><Label>Izvajalec</Label><Select name="contractorId" defaultValue="none"><SelectTrigger className="w-full" aria-invalid={Boolean(state.errors?.contractorId)}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Brez izvajalca</SelectItem>{contractors.map((contractor) => <SelectItem key={contractor.id} value={contractor.id}>{contractor.name} · {contractor.trade}</SelectItem>)}</SelectContent></Select>{state.errors?.contractorId ? <p className="text-xs text-destructive">{state.errors.contractorId[0]}</p> : null}</div>
             <div className="space-y-2"><Label>Status</Label><Select name="status" defaultValue="received" itemToStringLabel={(value) => ({ received: "Prejeto", approved: "Odobreno", paid: "Plačano" })[value] ?? value}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="received">Prejeto</SelectItem><SelectItem value="approved">Odobreno</SelectItem><SelectItem value="paid">Plačano</SelectItem></SelectContent></Select></div>
             <div className="space-y-2 sm:col-span-2"><Label htmlFor="note">Opomba</Label><Textarea id="note" name="note" rows={3} placeholder="Kratek kontekst za ostale investitorje" /></div>
           </div>

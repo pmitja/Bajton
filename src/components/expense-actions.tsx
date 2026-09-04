@@ -12,13 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Expense } from "@/lib/types";
+import { expenseCategorySuggestions } from "@/lib/format";
+import type { ContractorOption, Expense } from "@/lib/types";
 
 type Draft = {
   vendor: string;
   amount: string;
   invoiceDate: string;
-  category: Expense["categoryKey"];
+  category: string;
+  contractorId: string;
   status: "received" | "approved" | "paid";
   note: string;
 };
@@ -31,13 +33,14 @@ function draftFrom(expense: Expense): Draft {
     vendor: expense.vendor,
     amount: String(expense.amount),
     invoiceDate: expense.invoiceDate,
-    category: expense.categoryKey,
+    category: expense.category,
+    contractorId: expense.contractorId ?? "none",
     status,
     note: expense.note,
   };
 }
 
-export function ExpenseActions({ expense }: { expense: Expense }) {
+export function ExpenseActions({ expense, contractors }: { expense: Expense; contractors: ContractorOption[] }) {
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(() => draftFrom(expense));
@@ -122,17 +125,22 @@ export function ExpenseActions({ expense }: { expense: Expense }) {
                 <DatePicker id={`date-${expense.id}`} value={draft.invoiceDate} onValueChange={(invoiceDate) => setDraft((current) => ({ ...current, invoiceDate }))} required disabled={pending} />
               </div>
               <div className="space-y-2">
-                <Label>Kategorija</Label>
-                <Select value={draft.category} onValueChange={(category) => setDraft((current) => ({ ...current, category: category as Draft["category"] }))} disabled={pending}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="material">Material</SelectItem><SelectItem value="construction">Konstrukcija</SelectItem><SelectItem value="electrical">Elektroinštalacije</SelectItem><SelectItem value="documentation">Dokumentacija</SelectItem></SelectContent>
-                </Select>
+                <Label htmlFor={`category-${expense.id}`}>Kategorija</Label>
+                <Input id={`category-${expense.id}`} list={`category-suggestions-${expense.id}`} value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))} minLength={2} maxLength={60} required disabled={pending} />
+                <datalist id={`category-suggestions-${expense.id}`}>{expenseCategorySuggestions.map((category) => <option key={category} value={category} />)}</datalist>
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
                 <Select value={draft.status} onValueChange={(status) => setDraft((current) => ({ ...current, status: status as Draft["status"] }))} disabled={pending}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="received">Prejeto</SelectItem><SelectItem value="approved">Odobreno</SelectItem><SelectItem value="paid">Plačano</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Izvajalec</Label>
+                <Select value={draft.contractorId} onValueChange={(contractorId) => setDraft((current) => ({ ...current, contractorId: contractorId ?? "none" }))} disabled={pending}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="none">Brez izvajalca</SelectItem>{contractors.map((contractor) => <SelectItem key={contractor.id} value={contractor.id}>{contractor.name} · {contractor.trade}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-2 sm:col-span-2">

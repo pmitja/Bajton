@@ -7,20 +7,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { Expense } from "@/lib/types";
+import type { ContractorOption, Expense } from "@/lib/types";
 
 const euro = new Intl.NumberFormat("sl-SI", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const statuses = ["Vsi", "Prejeto", "Odobreno", "Plačano"] as const;
 const panelClass = "rounded-2xl border shadow-sm ring-0 [--card-spacing:--spacing(5)]";
 
-export function ExpensesWorkspace({ expenses, projectId }: { expenses: Expense[]; projectId: string }) {
+export function ExpensesWorkspace({ expenses, projectId, contractors }: { expenses: Expense[]; projectId: string; contractors: ContractorOption[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<(typeof statuses)[number]>("Vsi");
   const [category, setCategory] = useState("Vse kategorije");
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("sl"));
   const categories = useMemo(() => ["Vse kategorije", ...new Set(expenses.map((expense) => expense.category))], [expenses]);
   const filteredExpenses = useMemo(() => expenses.filter((expense) => {
-    const matchesQuery = !deferredQuery || `${expense.vendor} ${expense.category}`.toLocaleLowerCase("sl").includes(deferredQuery);
+    const matchesQuery = !deferredQuery || `${expense.vendor} ${expense.category} ${expense.contractor ?? ""}`.toLocaleLowerCase("sl").includes(deferredQuery);
     const matchesStatus = status === "Vsi" || expense.status === status;
     const matchesCategory = category === "Vse kategorije" || expense.category === category;
     return matchesQuery && matchesStatus && matchesCategory;
@@ -47,7 +47,7 @@ export function ExpensesWorkspace({ expenses, projectId }: { expenses: Expense[]
       <Card className="rounded-2xl border shadow-sm ring-0" aria-label="Filtri stroškov">
         <CardContent>
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-            <div className="relative min-w-0 flex-1"><Search className="absolute left-3.5 top-3.5 size-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Išči stroške" placeholder="Išči dobavitelja ali kategorijo …" className="h-11 pl-10" /></div>
+            <div className="relative min-w-0 flex-1"><Search className="absolute left-3.5 top-3.5 size-4 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Išči stroške" placeholder="Išči dobavitelja, izvajalca ali kategorijo …" className="h-11 pl-10" /></div>
             <Select value={category} onValueChange={(next) => setCategory(next ?? "Vse kategorije")}>
               <SelectTrigger id="expense-category" aria-label="Kategorija" className="h-11 w-full xl:w-56"><SelectValue /></SelectTrigger>
               <SelectContent>{categories.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
@@ -65,7 +65,7 @@ export function ExpensesWorkspace({ expenses, projectId }: { expenses: Expense[]
           <p className="mt-3 text-xs text-muted-foreground" aria-live="polite">{filteredExpenses.length} od {expenses.length} stroškov</p>
         </CardContent>
       </Card>
-      {filteredExpenses.length ? <ExpensesTable expenses={filteredExpenses} projectId={projectId} /> : (
+      {filteredExpenses.length ? <ExpensesTable expenses={filteredExpenses} projectId={projectId} contractors={contractors} /> : (
         <Card className="rounded-2xl border border-dashed shadow-none ring-0">
           <CardContent className="p-12 text-center">
             <p className="font-medium">Ni najdenih stroškov</p>

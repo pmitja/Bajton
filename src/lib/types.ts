@@ -34,6 +34,7 @@ export type ProjectSummary = {
 export type Task = {
   id: string;
   title: string;
+  dueDate: string;
   dueLabel: string;
   priority: "visoka" | "srednja" | "nizka";
   assignee: string;
@@ -43,8 +44,9 @@ export type Task = {
 export type Expense = {
   id: string;
   vendor: string;
+  contractorId: string | null;
+  contractor: string | null;
   category: string;
-  categoryKey: "material" | "construction" | "electrical" | "documentation";
   amount: number;
   date: string;
   invoiceDate: string;
@@ -92,6 +94,8 @@ export type Contractor = {
   status: "Aktiven" | "Ponudba";
 };
 
+export type ContractorOption = Pick<Contractor, "id" | "name" | "trade">;
+
 export type Investor = {
   id: string;
   name: string;
@@ -114,6 +118,7 @@ export type DashboardData = {
   currentUser: CurrentUser;
   tasks: Task[];
   expenses: Expense[];
+  contractorOptions: ContractorOption[];
   phases: PhaseItem[];
   activity: ActivityItem[];
   monthlySpending: MonthlySpending[];

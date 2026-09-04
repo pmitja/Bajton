@@ -4,11 +4,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { Expense } from "@/lib/types";
+import type { ContractorOption, Expense } from "@/lib/types";
 
 const euro = new Intl.NumberFormat("sl-SI", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
-export function ExpensesTable({ expenses, projectId }: { expenses: Expense[]; projectId: string }) {
+export function ExpensesTable({ expenses, projectId, contractors }: { expenses: Expense[]; projectId: string; contractors: ContractorOption[] }) {
   return (
     <Card className="gap-0 rounded-2xl border py-0 shadow-sm ring-0">
       <Table className="min-w-[720px]">
@@ -31,6 +31,7 @@ export function ExpensesTable({ expenses, projectId }: { expenses: Expense[]; pr
                   <div>
                     <p className="font-medium">{expense.vendor}</p>
                     <p className="text-xs text-muted-foreground">{expense.date} · dodal {expense.initials}</p>
+                    {expense.contractor ? <p className="text-xs text-muted-foreground">Izvajalec: {expense.contractor}</p> : null}
                   </div>
                 </div>
               </TableCell>
@@ -38,7 +39,7 @@ export function ExpensesTable({ expenses, projectId }: { expenses: Expense[]; pr
               <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
               <TableCell className="px-4 py-3.5"><AttachInvoiceDialog expenseId={expense.id} projectId={projectId} vendor={expense.vendor} attachmentCount={expense.attachmentCount} /></TableCell>
               <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
-              <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} /></TableCell>
+              <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} contractors={contractors} /></TableCell>
             </TableRow>
           ))}
         </TableBody>

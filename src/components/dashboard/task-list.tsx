@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { CheckCircle2, CircleDashed, Plus, Search, Trash2, UserRound } from "lucide-react";
+import { CheckCircle2, CircleDashed, Pencil, Plus, Search, Trash2, UserRound } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Task } from "@/lib/types";
-import { createTask, deleteTask as deleteTaskAction, toggleTask as toggleTaskAction } from "@/app/actions";
+import { createTask, deleteTask as deleteTaskAction, toggleTask as toggleTaskAction, updateTask as updateTaskAction } from "@/app/actions";
 
 const priorityStyle = {
   visoka: "border-red-200 bg-red-50 text-red-700",
@@ -29,7 +29,9 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
   const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">("all");
   // Ključ obrazca; ob uspešnem dodajanju ponastavi izbirnik datuma.
   const [formKey, setFormKey] = useState(0);
+  const [taskToEdit, setTaskToEdit] = useState<Task | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [editMessage, setEditMessage] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const openCount = useMemo(() => items.filter((item) => !item.completed).length, [items]);
@@ -113,6 +115,34 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
     });
   }
 
+  function editTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!taskToEdit) return;
+
+    const formData = new FormData(event.currentTarget);
+    const input = {
+      title: String(formData.get("title") ?? ""),
+      dueDate: String(formData.get("dueDate") ?? ""),
+      priority: String(formData.get("priority") ?? "srednja") as Task["priority"],
+    };
+    setEditMessage("");
+    startTransition(async () => {
+      try {
+        const result = await updateTaskAction(taskToEdit.id, input);
+        if (!result.success) {
+          setEditMessage(result.message);
+          return;
+        }
+        setItems((current) => current.map((item) => item.id === taskToEdit.id ? { ...item, ...result.task } : item));
+        setTaskToEdit(null);
+        setMessage("Opravilo je posodobljeno.");
+        router.refresh();
+      } catch {
+        setEditMessage("Opravila ni bilo mogoče posodobiti. Poskusi znova.");
+      }
+    });
+  }
+
   return (
     <section className="rounded-2xl border bg-card shadow-sm" aria-labelledby="tasks-title">
       <div className="flex items-center justify-between border-b px-5 py-4">
@@ -139,7 +169,7 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
           <Plus className="size-4" />{full ? <span>Dodaj</span> : null}
         </Button>
       </form>
-      {message ? <p className={`border-b px-5 py-2 text-sm ${message === "Opravilo je dodano." || message === "Opravilo je odstranjeno." ? "text-emerald-700" : "text-destructive"}`} role="status" aria-live="polite">{message}</p> : null}
+      {message ? <p className={`border-b px-5 py-2 text-sm ${["Opravilo je dodano.", "Opravilo je posodobljeno.", "Opravilo je odstranjeno."].includes(message) ? "text-emerald-700" : "text-destructive"}`} role="status" aria-live="polite">{message}</p> : null}
       <div className="divide-y">
         {visibleItems.map((task) => (
           <div key={task.id} className="group flex min-h-17 items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/45">
@@ -153,11 +183,25 @@ export function TaskList({ initialTasks, showAllLink = true, full = false }: { i
               </div>
             </div>
             <Badge variant="outline" className={priorityStyle[task.priority]}>{task.priority}</Badge>
-            {full ? <Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => setTaskToDelete(task)} aria-label={`Odstrani opravilo ${task.title}`} disabled={pending}><Trash2 className="size-4" /></Button> : null}
+            {full ? <div className="flex items-center"><Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => { setEditMessage(""); setTaskToEdit(task); }} aria-label={`Uredi opravilo ${task.title}`} disabled={pending}><Pencil className="size-4" /></Button><Button type="button" variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => setTaskToDelete(task)} aria-label={`Odstrani opravilo ${task.title}`} disabled={pending}><Trash2 className="size-4" /></Button></div> : null}
           </div>
         ))}
         {visibleItems.length === 0 ? <div className="p-10 text-center"><p className="font-medium">Ni najdenih opravil</p><p className="mt-1 text-sm text-muted-foreground">Spremeni iskanje ali izbrani filter.</p></div> : null}
       </div>
+      <Dialog open={Boolean(taskToEdit)} onOpenChange={(open) => { if (!open && !pending) setTaskToEdit(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={editTask}>
+            <DialogHeader><DialogTitle>Uredi opravilo</DialogTitle><DialogDescription>Spremeni naslov, rok ali prioriteto opravila.</DialogDescription></DialogHeader>
+            <div className="grid gap-4 py-5 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2"><label htmlFor="edit-task-title" className="text-sm font-medium">Naslov</label><Input id="edit-task-title" name="title" defaultValue={taskToEdit?.title} minLength={2} maxLength={160} required disabled={pending} /></div>
+              <div className="space-y-2"><label htmlFor="edit-task-due-date" className="text-sm font-medium">Rok</label><DatePicker key={taskToEdit?.id} id="edit-task-due-date" name="dueDate" defaultValue={taskToEdit?.dueDate} placeholder="Brez roka" disabled={pending} /></div>
+              <div className="space-y-2"><label htmlFor="edit-task-priority" className="text-sm font-medium">Prioriteta</label><Select key={taskToEdit?.id} name="priority" defaultValue={taskToEdit?.priority ?? "srednja"} disabled={pending} itemToStringLabel={(value) => ({ nizka: "Nizka", srednja: "Srednja", visoka: "Visoka" })[value] ?? value}><SelectTrigger id="edit-task-priority" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="nizka">Nizka</SelectItem><SelectItem value="srednja">Srednja</SelectItem><SelectItem value="visoka">Visoka</SelectItem></SelectContent></Select></div>
+            </div>
+            {editMessage ? <p className="mb-4 text-sm text-destructive" role="alert">{editMessage}</p> : null}
+            <DialogFooter><DialogClose render={<Button type="button" variant="outline" disabled={pending} />}>Prekliči</DialogClose><Button type="submit" disabled={pending}>{pending ? "Shranjujem …" : "Shrani spremembe"}</Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(taskToDelete)} onOpenChange={(open) => { if (!open) setTaskToDelete(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Odstrani opravilo?</DialogTitle><DialogDescription>Opravilo “{taskToDelete?.title}” bo trajno odstranjeno s projekta.</DialogDescription></DialogHeader>

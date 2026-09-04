@@ -5,9 +5,9 @@ import { redirect } from "next/navigation";
 import { and, asc, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/auth";
-import { activityEvents, categories, expenseAttachments, expenses, payments, projectMembers, projectPhases, projects, tasks, users, vendors } from "@/db/schema";
-import { expenseCategoryKey, expenseStatusLabels, formatDueLabel, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
-import type { ActivityItem, Contractor, CurrentUser, DashboardData, Expense, Investor, MonthlySpending, PhaseItem, ProjectDocument, ProjectSummary, SearchEntry, Task } from "@/lib/types";
+import { activityEvents, categories, contractors, expenseAttachments, expenses, payments, projectMembers, projectPhases, projects, tasks, users, vendors } from "@/db/schema";
+import { expenseStatusLabels, formatDueLabel, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
+import type { ActivityItem, Contractor, ContractorOption, CurrentUser, DashboardData, Expense, Investor, MonthlySpending, PhaseItem, ProjectDocument, ProjectSummary, SearchEntry, Task } from "@/lib/types";
 
 export type ProjectContext = {
   db: ReturnType<typeof getDb>;
@@ -80,6 +80,8 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
       id: expenses.id,
       title: expenses.title,
       vendor: vendors.name,
+      contractorId: expenses.contractorId,
+      contractor: contractors.name,
       category: categories.name,
       grossAmount: expenses.grossAmount,
       status: expenses.status,
@@ -91,6 +93,7 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
     })
     .from(expenses)
     .leftJoin(vendors, eq(expenses.vendorId, vendors.id))
+    .leftJoin(contractors, eq(expenses.contractorId, contractors.id))
     .leftJoin(categories, eq(expenses.categoryId, categories.id))
     .leftJoin(users, eq(expenses.createdBy, users.id))
     .where(and(eq(expenses.projectId, project.id), isNull(expenses.deletedAt)))
@@ -99,8 +102,9 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
   return rows.map((row) => ({
     id: row.id,
     vendor: row.vendor ?? row.title,
+    contractorId: row.contractorId,
+    contractor: row.contractor,
     category: row.category ?? "Nerazporejeno",
-    categoryKey: expenseCategoryKey(row.category),
     amount: toNumber(row.grossAmount),
     date: formatShortDate(row.invoiceDate ?? row.createdAt),
     invoiceDate: row.invoiceDate ?? row.createdAt.toISOString().slice(0, 10),
@@ -130,9 +134,10 @@ async function getTasks({ db, project }: ProjectContext): Promise<Task[]> {
     .orderBy(asc(tasks.status), sql`${tasks.dueDate} asc nulls last`, desc(tasks.createdAt));
 
   return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    dueLabel: formatDueLabel(row.dueDate, row.status === "done"),
+      id: row.id,
+      title: row.title,
+      dueDate: row.dueDate ?? "",
+      dueLabel: formatDueLabel(row.dueDate, row.status === "done"),
     priority: priorityLabels[row.priority],
     assignee: row.assigneeName ? initialsOf(row.assigneeName) : "—",
     completed: row.status === "done",
@@ -172,6 +177,7 @@ function describeEvent(entityType: string, action: string, after: EventPayload) 
   if (entityType === "expense" && action === "paid") return `je plačal(a) račun ${label}`;
   if (entityType === "expense" && action === "updated") return `je posodobil(a) račun ${label}`;
   if (entityType === "expense" && action === "deleted") return `je odstranil(a) strošek ${label}`;
+  if (entityType === "contractor" && action === "created") return `je dodal(a) izvajalca ${label}`;
   if (entityType === "task" && action === "created") return `je dodal(a) opravilo ${label}`;
   if (entityType === "task" && action === "completed") return `je zaključil(a) opravilo ${label}`;
   if (entityType === "task" && action === "deleted") return `je odstranil(a) opravilo ${label}`;
@@ -251,19 +257,21 @@ async function getMonthlySpending({ db, project }: ProjectContext): Promise<Mont
 
 export async function getDashboardData(): Promise<DashboardData> {
   const context = await getProjectContext();
-  const [project, expenseRows, taskRows, phaseRows, activityRows, monthlySpending] = await Promise.all([
+  const [project, expenseRows, taskRows, phaseRows, activityRows, monthlySpending, contractorOptions] = await Promise.all([
     getProjectSummary(context),
     getExpenses(context),
     getTasks(context),
     getPhases(context),
     getActivity(context),
     getMonthlySpending(context),
+    getContractorOptionsFor(context),
   ]);
 
   return {
     project,
     currentUser: context.currentUser,
     expenses: expenseRows,
+    contractorOptions,
     tasks: taskRows,
     phases: phaseRows,
     activity: activityRows,
@@ -286,7 +294,7 @@ export async function getSearchIndex(): Promise<SearchEntry[]> {
       id: `expense-${expense.id}`,
       kind: "expense" as const,
       label: expense.vendor,
-      description: `${expense.category} · ${formatMoney(expense.amount)} · ${expense.status}`,
+      description: `${expense.category}${expense.contractor ? ` · ${expense.contractor}` : ""} · ${formatMoney(expense.amount)} · ${expense.status}`,
       href: "/expenses",
     })),
     ...taskRows.map((task) => ({
@@ -323,29 +331,35 @@ function fileTypeLabel(mimeType: string, name: string) {
 async function getContractorsFor({ db, project }: ProjectContext): Promise<Contractor[]> {
   const rows = await db
     .select({
-      id: vendors.id,
-      name: vendors.name,
-      email: vendors.email,
-      phone: vendors.phone,
-      notes: vendors.notes,
+      id: contractors.id,
+      name: contractors.name,
+      trade: contractors.trade,
+      email: contractors.email,
+      phone: contractors.phone,
       expenseCount: sql<number>`count(${expenses.id})::int`,
-      trade: sql<string | null>`max(${categories.name})`,
     })
-    .from(vendors)
-    .leftJoin(expenses, and(eq(expenses.vendorId, vendors.id), isNull(expenses.deletedAt)))
-    .leftJoin(categories, eq(expenses.categoryId, categories.id))
-    .where(and(eq(vendors.projectId, project.id), isNull(vendors.deletedAt)))
-    .groupBy(vendors.id)
-    .orderBy(desc(sql`count(${expenses.id})`), asc(vendors.name));
+    .from(contractors)
+    .leftJoin(expenses, and(eq(expenses.contractorId, contractors.id), isNull(expenses.deletedAt)))
+    .where(and(eq(contractors.projectId, project.id), isNull(contractors.deletedAt)))
+    .groupBy(contractors.id)
+    .orderBy(desc(sql`count(${expenses.id})`), asc(contractors.name));
 
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
-    trade: row.notes ?? row.trade ?? "Izvajalec",
+    trade: row.trade,
     phone: row.phone ?? "—",
     email: row.email ?? "—",
     status: row.expenseCount > 0 ? "Aktiven" : "Ponudba",
   }));
+}
+
+async function getContractorOptionsFor({ db, project }: ProjectContext): Promise<ContractorOption[]> {
+  return db
+    .select({ id: contractors.id, name: contractors.name, trade: contractors.trade })
+    .from(contractors)
+    .where(and(eq(contractors.projectId, project.id), isNull(contractors.deletedAt)))
+    .orderBy(asc(contractors.name));
 }
 
 export async function getContractors(): Promise<Contractor[]> {

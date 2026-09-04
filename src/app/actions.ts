@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { activityEvents, categories, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
+import { activityEvents, categories, contractors, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
 import { getProjectContext, type ProjectContext } from "@/db/queries";
-import { expenseCategoryLabels, expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
+import { expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
 import { getFileUrl, getUtApi } from "@/lib/utapi";
 import type { InvoiceAttachment, Task } from "@/lib/types";
 
@@ -23,7 +23,8 @@ const expenseSchema = z.object({
   vendor: z.string().trim().min(2, "Vnesi dobavitelja."),
   amount: z.string().trim().transform((value) => Number(value.replace(",", "."))).pipe(z.number().positive("Znesek mora biti večji od 0.")),
   invoiceDate: z.iso.date("Izberi veljaven datum."),
-  category: z.enum(["material", "construction", "electrical", "documentation"], "Izberi kategorijo."),
+  category: z.string().trim().min(2, "Vnesi kategorijo.").max(60, "Kategorija je predolga.").transform((value) => value.replace(/\s+/g, " ")),
+  contractorId: z.union([z.uuid(), z.literal("none")]).transform((value) => value === "none" ? null : value),
   status: z.enum(["received", "approved", "paid"]),
   note: z.string().trim().max(500, "Opomba je predolga.").optional(),
 });
@@ -32,7 +33,7 @@ async function findOrCreateCategory({ db, project }: ProjectContext, name: strin
   const [existing] = await db
     .select({ id: categories.id })
     .from(categories)
-    .where(and(eq(categories.projectId, project.id), eq(categories.name, name), isNull(categories.deletedAt)))
+    .where(and(eq(categories.projectId, project.id), sql`lower(${categories.name}) = lower(${name})`, isNull(categories.deletedAt)))
     .limit(1);
   if (existing) return existing.id;
 
@@ -53,6 +54,17 @@ async function findOrCreateVendor({ db, project, currentUser }: ProjectContext, 
     .values({ projectId: project.id, name, createdBy: currentUser.id })
     .returning({ id: vendors.id });
   return created.id;
+}
+
+async function resolveContractorId({ db, project }: ProjectContext, contractorId: string | null) {
+  if (!contractorId) return null;
+
+  const [contractor] = await db
+    .select({ id: contractors.id })
+    .from(contractors)
+    .where(and(eq(contractors.id, contractorId), eq(contractors.projectId, project.id), isNull(contractors.deletedAt)))
+    .limit(1);
+  return contractor?.id;
 }
 
 async function logActivity(
@@ -98,12 +110,16 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     };
   }
 
-  const { expenseId, vendor, amount, invoiceDate, category, status, note } = parsed.data;
+  const { expenseId, vendor, amount, invoiceDate, category, contractorId, status, note } = parsed.data;
   const context = await getProjectContext();
-  const [categoryId, vendorId] = await Promise.all([
-    findOrCreateCategory(context, expenseCategoryLabels[category]),
+  const [categoryId, vendorId, selectedContractorId] = await Promise.all([
+    findOrCreateCategory(context, category),
     findOrCreateVendor(context, vendor),
+    resolveContractorId(context, contractorId),
   ]);
+  if (contractorId && !selectedContractorId) {
+    return { success: false, message: "Izbrani izvajalec ne obstaja.", revision: previousState.revision, errors: { contractorId: ["Izberi veljavnega izvajalca."] } };
+  }
 
   const net = Number((amount / (1 + TAX_RATE)).toFixed(2));
   const tax = Number((amount - net).toFixed(2));
@@ -113,7 +129,8 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     projectId: context.project.id,
     categoryId,
     vendorId,
-    title: `${expenseCategoryLabels[category]} – ${vendor}`,
+    contractorId: selectedContractorId,
+    title: `${category} – ${vendor}`,
     invoiceDate,
     netAmount: net.toFixed(2),
     taxAmount: tax.toFixed(2),
@@ -189,11 +206,13 @@ export async function updateExpense(expenseId: string, input: ExpenseInput) {
 
   if (!expense) return { success: false, message: "Strošek ne obstaja." } as const;
 
-  const { vendor, amount, invoiceDate, category, status, note } = parsed.data;
-  const [categoryId, vendorId] = await Promise.all([
-    findOrCreateCategory(context, expenseCategoryLabels[category]),
+  const { vendor, amount, invoiceDate, category, contractorId, status, note } = parsed.data;
+  const [categoryId, vendorId, selectedContractorId] = await Promise.all([
+    findOrCreateCategory(context, category),
     findOrCreateVendor(context, vendor),
+    resolveContractorId(context, contractorId),
   ]);
+  if (contractorId && !selectedContractorId) return { success: false, message: "Izbrani izvajalec ne obstaja." } as const;
   const net = Number((amount / (1 + TAX_RATE)).toFixed(2));
   const tax = Number((amount - net).toFixed(2));
 
@@ -202,7 +221,8 @@ export async function updateExpense(expenseId: string, input: ExpenseInput) {
     .set({
       categoryId,
       vendorId,
-      title: `${expenseCategoryLabels[category]} – ${vendor}`,
+      contractorId: selectedContractorId,
+      title: `${category} – ${vendor}`,
       invoiceDate,
       netAmount: net.toFixed(2),
       taxAmount: tax.toFixed(2),
@@ -266,6 +286,74 @@ export async function deleteExpense(expenseId: string) {
 
   revalidateProject();
   return { success: true, message: "Strošek je odstranjen." } as const;
+}
+
+export type ContractorActionState = {
+  success: boolean;
+  message: string;
+  revision: number;
+  errors?: Record<string, string[] | undefined>;
+};
+
+const contractorSchema = z.object({
+  name: z.string().trim().min(2, "Vnesi ime izvajalca.").max(100, "Ime izvajalca je predolgo."),
+  trade: z.string().trim().min(2, "Vnesi stroko.").max(80, "Stroka je predolga."),
+  phone: z.string().trim().max(40, "Telefonska številka je predolga."),
+  email: z.union([z.literal(""), z.email("Vnesi veljaven e-poštni naslov.")]),
+  notes: z.string().trim().max(500, "Opomba je predolga."),
+});
+
+export async function createContractor(previousState: ContractorActionState, formData: FormData): Promise<ContractorActionState> {
+  const parsed = contractorSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: "Preveri označena polja.",
+      revision: previousState.revision,
+      errors: z.flattenError(parsed.error).fieldErrors,
+    };
+  }
+
+  const context = await getProjectContext();
+  const [existing] = await context.db
+    .select({ id: contractors.id })
+    .from(contractors)
+    .where(and(
+      eq(contractors.projectId, context.project.id),
+      sql`lower(${contractors.name}) = lower(${parsed.data.name})`,
+      isNull(contractors.deletedAt),
+    ))
+    .limit(1);
+  if (existing) {
+    return {
+      success: false,
+      message: "Izvajalec s tem imenom že obstaja.",
+      revision: previousState.revision,
+      errors: { name: ["Izvajalec s tem imenom že obstaja."] },
+    };
+  }
+
+  const [created] = await context.db
+    .insert(contractors)
+    .values({
+      projectId: context.project.id,
+      name: parsed.data.name,
+      trade: parsed.data.trade,
+      phone: parsed.data.phone || null,
+      email: parsed.data.email || null,
+      notes: parsed.data.notes || null,
+      createdBy: context.currentUser.id,
+    })
+    .returning({ id: contractors.id, name: contractors.name });
+
+  await logActivity(context, {
+    entityType: "contractor",
+    entityId: created.id,
+    action: "created",
+    afterData: { name: created.name },
+  });
+  revalidateProject();
+  return { success: true, message: "Izvajalec je dodan.", revision: previousState.revision + 1 };
 }
 
 /**
@@ -387,7 +475,9 @@ const taskSchema = z.object({
   priority: z.enum(["nizka", "srednja", "visoka"]),
 });
 
-export async function createTask(input: { title: string; dueDate: string; priority: Task["priority"] }) {
+export type TaskInput = z.input<typeof taskSchema>;
+
+export async function createTask(input: TaskInput) {
   const parsed = taskSchema.safeParse(input);
   if (!parsed.success) return { success: false, message: "Vnesi veljaven naslov opravila." } as const;
 
@@ -413,11 +503,59 @@ export async function createTask(input: { title: string; dueDate: string; priori
     task: {
       id: created.id,
       title: created.title,
+      dueDate: created.dueDate ?? "",
       dueLabel: formatDueLabel(created.dueDate),
       priority: priorityLabels[created.priority],
       assignee: initialsOf(context.currentUser.name),
       completed: false,
     } satisfies Task,
+  } as const;
+}
+
+export async function updateTask(taskId: string, input: TaskInput) {
+  const parsedId = z.string().uuid().safeParse(taskId);
+  const parsed = taskSchema.safeParse(input);
+  if (!parsedId.success) return { success: false, message: "Opravila ni bilo mogoče posodobiti." } as const;
+  if (!parsed.success) return { success: false, message: "Preveri naslov, rok in prioriteto." } as const;
+
+  const context = await getProjectContext();
+  const [task] = await context.db
+    .select({ id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, priority: tasks.priority, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.id, parsedId.data), eq(tasks.projectId, context.project.id), isNull(tasks.deletedAt)))
+    .limit(1);
+  if (!task) return { success: false, message: "Opravilo ne obstaja." } as const;
+
+  const dueDate = parsed.data.dueDate || null;
+  const priority = priorityValues[parsed.data.priority];
+  await context.db
+    .update(tasks)
+    .set({
+      title: parsed.data.title,
+      dueDate,
+      priority,
+      updatedBy: context.currentUser.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(tasks.id, task.id));
+
+  await logActivity(context, {
+    entityType: "task",
+    entityId: task.id,
+    action: "updated",
+    beforeData: { title: task.title, dueDate: task.dueDate, priority: priorityLabels[task.priority] },
+    afterData: { title: parsed.data.title, dueDate, priority: parsed.data.priority },
+  });
+
+  revalidateProject();
+  return {
+    success: true,
+    task: {
+      title: parsed.data.title,
+      dueDate: dueDate ?? "",
+      dueLabel: formatDueLabel(dueDate, task.status === "done"),
+      priority: parsed.data.priority,
+    },
   } as const;
 }
 

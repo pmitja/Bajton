@@ -59,11 +59,24 @@ export const vendors = pgTable("vendors", {
   ...auditColumns,
 }, (table) => [index("vendors_project_idx").on(table.projectId)]);
 
+export const contractors = pgTable("contractors", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  name: text("name").notNull(),
+  trade: text("trade").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id).notNull(),
+  ...auditColumns,
+}, (table) => [index("contractors_project_idx").on(table.projectId)]);
+
 export const expenses = pgTable("expenses", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
   categoryId: uuid("category_id").references(() => categories.id),
   vendorId: uuid("vendor_id").references(() => vendors.id),
+  contractorId: uuid("contractor_id").references(() => contractors.id),
   title: text("title").notNull(),
   invoiceNumber: text("invoice_number"),
   invoiceDate: date("invoice_date"),

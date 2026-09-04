@@ -26,7 +26,7 @@ const reset = process.argv.includes("--reset");
 
 const TABLES = [
   "activity_events", "expense_attachments", "payments", "expenses", "tasks",
-  "project_phases", "vendors", "categories", "project_members", "projects", "users",
+  "project_phases", "contractors", "vendors", "categories", "project_members", "projects", "users",
 ];
 
 const MITJA_ID = "734d683c-a201-47dd-b813-754e90e4f782";

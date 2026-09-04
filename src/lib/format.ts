@@ -21,10 +21,7 @@ export const expenseCategoryLabels = {
   documentation: "Dokumentacija",
 } as const;
 
-export function expenseCategoryKey(name: string | null) {
-  const entry = Object.entries(expenseCategoryLabels).find(([, label]) => label === name);
-  return (entry?.[0] ?? "material") as keyof typeof expenseCategoryLabels;
-}
+export const expenseCategorySuggestions = Object.values(expenseCategoryLabels);
 
 export const priorityLabels = { low: "nizka", medium: "srednja", high: "visoka" } as const;
 export const priorityValues = { nizka: "low", srednja: "medium", visoka: "high" } as const;
