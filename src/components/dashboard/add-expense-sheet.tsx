@@ -3,7 +3,7 @@
 import { useActionState, useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileText, Plus, UploadCloud } from "lucide-react";
-import { UploadDropzone, dropzoneAppearance, uploadDisabledNotice, uploadEnabled } from "@/lib/uploadthing";
+import { UploadDropzone, dropzoneAppearance, dropzoneConfig, uploadDisabledNotice, uploadEnabled } from "@/lib/uploadthing";
 import { Button } from "@/components/ui/button";
 import { DatePicker, toIsoDate } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,7 @@ export function AddExpenseSheet({ projectId, contractors, fundingSources, member
                 onClientUploadComplete={(files) => setUploadedCount((count) => count + files.length)}
                 onUploadError={(error) => setUploadError(error.message)}
                 appearance={dropzoneAppearance}
+                config={dropzoneConfig}
               />
             ) : (
               <div className="flex min-h-40 flex-col items-center justify-center text-center">

@@ -13,3 +13,6 @@ export const dropzoneAppearance = {
   label: "text-sm font-medium",
   allowedContent: "text-xs text-muted-foreground",
 } as const;
+
+/** Datoteka se naloži takoj ob izbiri; privzeti "manual" način čaka na dodaten klik. */
+export const dropzoneConfig = { mode: "auto" } as const;

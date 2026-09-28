@@ -3,7 +3,7 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, FileText, Loader2, Paperclip, Trash2, UploadCloud } from "lucide-react";
-import { UploadDropzone, dropzoneAppearance, uploadDisabledNotice, uploadEnabled } from "@/lib/uploadthing";
+import { UploadDropzone, dropzoneAppearance, dropzoneConfig, uploadDisabledNotice, uploadEnabled } from "@/lib/uploadthing";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { deleteInvoiceAttachment, getInvoiceDownloadUrl, listInvoiceAttachments, refreshAfterInvoiceUpload } from "@/app/actions";
@@ -146,6 +146,7 @@ export function AttachInvoiceDialog({ expenseId, projectId, vendor, attachmentCo
               onClientUploadComplete={handleUploadComplete}
               onUploadError={(uploadError) => setError(uploadError.message)}
               appearance={dropzoneAppearance}
+              config={dropzoneConfig}
             />
           ) : (
             <div className="flex min-h-40 flex-col items-center justify-center text-center">
