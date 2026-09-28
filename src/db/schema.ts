@@ -3,6 +3,7 @@ import { boolean, date, index, integer, jsonb, numeric, pgEnum, pgTable, primary
 export const expenseStatus = pgEnum("expense_status", ["draft", "received", "approved", "partially_paid", "paid", "cancelled"]);
 export const taskStatus = pgEnum("task_status", ["todo", "in_progress", "done"]);
 export const taskPriority = pgEnum("task_priority", ["low", "medium", "high"]);
+export const fundingSourceKind = pgEnum("funding_source_kind", ["loan", "capital", "own"]);
 export const activityAction = pgEnum("activity_action", ["created", "updated", "completed", "deleted", "uploaded", "paid"]);
 
 const auditColumns = {
@@ -47,6 +48,20 @@ export const categories = pgTable("categories", {
   ...auditColumns,
 }, (table) => [index("categories_project_idx").on(table.projectId)]);
 
+/**
+ * Vir financiranja (kredit, dodatni kapital, lastna sredstva). Znesek NULL
+ * pomeni vir brez zgornje meje — tak vir ne šteje v proračun projekta.
+ */
+export const fundingSources = pgTable("funding_sources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  name: text("name").notNull(),
+  kind: fundingSourceKind("kind").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  ...auditColumns,
+}, (table) => [index("funding_sources_project_idx").on(table.projectId)]);
+
 export const vendors = pgTable("vendors", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
@@ -77,6 +92,9 @@ export const expenses = pgTable("expenses", {
   categoryId: uuid("category_id").references(() => categories.id),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   contractorId: uuid("contractor_id").references(() => contractors.id),
+  fundingSourceId: uuid("funding_source_id").references(() => fundingSources.id),
+  /** Kdo je plačal iz lastnih sredstev; pri ostalih virih je NULL. */
+  paidBy: uuid("paid_by").references(() => users.id),
   title: text("title").notNull(),
   invoiceNumber: text("invoice_number"),
   invoiceDate: date("invoice_date"),

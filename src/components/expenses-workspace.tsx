@@ -7,24 +7,28 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { ContractorOption, Expense } from "@/lib/types";
+import type { ContractorOption, Expense, FundingSourceOption, MemberOption } from "@/lib/types";
 
 const euro = new Intl.NumberFormat("sl-SI", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const statuses = ["Vsi", "Prejeto", "Odobreno", "Plačano"] as const;
 const panelClass = "rounded-2xl border shadow-sm ring-0 [--card-spacing:--spacing(5)]";
 
-export function ExpensesWorkspace({ expenses, projectId, contractors }: { expenses: Expense[]; projectId: string; contractors: ContractorOption[] }) {
+const allSources = "Vsi viri";
+
+export function ExpensesWorkspace({ expenses, projectId, contractors, fundingSources, members }: { expenses: Expense[]; projectId: string; contractors: ContractorOption[]; fundingSources: FundingSourceOption[]; members: MemberOption[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<(typeof statuses)[number]>("Vsi");
   const [category, setCategory] = useState("Vse kategorije");
+  const [source, setSource] = useState(allSources);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("sl"));
   const categories = useMemo(() => ["Vse kategorije", ...new Set(expenses.map((expense) => expense.category))], [expenses]);
   const filteredExpenses = useMemo(() => expenses.filter((expense) => {
-    const matchesQuery = !deferredQuery || `${expense.vendor} ${expense.category} ${expense.contractor ?? ""}`.toLocaleLowerCase("sl").includes(deferredQuery);
+    const matchesQuery = !deferredQuery || `${expense.vendor} ${expense.category} ${expense.contractor ?? ""} ${expense.paidBy ?? ""}`.toLocaleLowerCase("sl").includes(deferredQuery);
     const matchesStatus = status === "Vsi" || expense.status === status;
     const matchesCategory = category === "Vse kategorije" || expense.category === category;
-    return matchesQuery && matchesStatus && matchesCategory;
-  }), [category, deferredQuery, expenses, status]);
+    const matchesSource = source === allSources || expense.fundingSource === source;
+    return matchesQuery && matchesStatus && matchesCategory && matchesSource;
+  }), [category, deferredQuery, expenses, source, status]);
   const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const paid = expenses.filter((expense) => expense.status === "Plačano").reduce((sum, expense) => sum + expense.amount, 0);
   const open = total - paid;
@@ -52,6 +56,10 @@ export function ExpensesWorkspace({ expenses, projectId, contractors }: { expens
               <SelectTrigger id="expense-category" aria-label="Kategorija" className="h-11 w-full xl:w-56"><SelectValue /></SelectTrigger>
               <SelectContent>{categories.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
             </Select>
+            <Select value={source} onValueChange={(next) => setSource(next ?? allSources)}>
+              <SelectTrigger id="expense-funding-source" aria-label="Vir financiranja" className="h-11 w-full xl:w-48"><SelectValue /></SelectTrigger>
+              <SelectContent>{[allSources, ...fundingSources.map((item) => item.name)].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+            </Select>
             <ToggleGroup
               aria-label="Status stroška"
               spacing={0}
@@ -65,7 +73,7 @@ export function ExpensesWorkspace({ expenses, projectId, contractors }: { expens
           <p className="mt-3 text-xs text-muted-foreground" aria-live="polite">{filteredExpenses.length} od {expenses.length} stroškov</p>
         </CardContent>
       </Card>
-      {filteredExpenses.length ? <ExpensesTable expenses={filteredExpenses} projectId={projectId} contractors={contractors} /> : (
+      {filteredExpenses.length ? <ExpensesTable expenses={filteredExpenses} projectId={projectId} contractors={contractors} fundingSources={fundingSources} members={members} /> : (
         <Card className="rounded-2xl border border-dashed shadow-none ring-0">
           <CardContent className="p-12 text-center">
             <p className="font-medium">Ni najdenih stroškov</p>

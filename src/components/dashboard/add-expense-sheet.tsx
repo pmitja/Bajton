@@ -13,11 +13,23 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Textarea } from "@/components/ui/textarea";
 import { createExpense, type ExpenseActionState } from "@/app/actions";
 import { expenseCategorySuggestions } from "@/lib/format";
-import type { ContractorOption } from "@/lib/types";
+import type { ContractorOption, FundingSourceOption, MemberOption } from "@/lib/types";
 
 const initialState: ExpenseActionState = { success: false, message: "", revision: 0 };
 
-export function AddExpenseSheet({ projectId, contractors }: { projectId: string; contractors: ContractorOption[] }) {
+type AddExpenseSheetProps = {
+  projectId: string;
+  contractors: ContractorOption[];
+  fundingSources: FundingSourceOption[];
+  members: MemberOption[];
+  currentUserId: string;
+};
+
+export function AddExpenseSheet({ projectId, contractors, fundingSources, members, currentUserId }: AddExpenseSheetProps) {
+  const fundingSourceNames = Object.fromEntries(fundingSources.map((source) => [source.id, source.name]));
+  const memberNames = Object.fromEntries(members.map((member) => [member.id, member.name]));
+  const [fundingSourceId, setFundingSourceId] = useState(fundingSources[0]?.id ?? "");
+  const paidFromOwnFunds = fundingSources.find((source) => source.id === fundingSourceId)?.kind === "own";
   const [open, setOpen] = useState(false);
   const [expenseId, setExpenseId] = useState(() => crypto.randomUUID());
   // Datum računa je privzeto današnji dan; ob vsakem novem obrazcu ga osvežimo.
@@ -33,13 +45,14 @@ export function AddExpenseSheet({ projectId, contractors }: { projectId: string;
       // Nov UUID, da se naslednje priloge ne vežejo na pravkar shranjeni strošek.
       setExpenseId(crypto.randomUUID());
       setToday(toIsoDate(new Date()));
+      setFundingSourceId(fundingSources[0]?.id ?? "");
       setUploadedCount(0);
       setUploadError(null);
       setOpen(false);
       router.refresh();
     }
     return result;
-  }, [router]);
+  }, [fundingSources, router]);
   const [state, formAction, pending] = useActionState(submitExpense, initialState);
 
   return (
@@ -80,6 +93,8 @@ export function AddExpenseSheet({ projectId, contractors }: { projectId: string;
             <div className="space-y-2"><Label htmlFor="invoiceDate">Datum računa</Label><DatePicker key={expenseId} id="invoiceDate" name="invoiceDate" defaultValue={today} required aria-invalid={Boolean(state.errors?.invoiceDate)} />{state.errors?.invoiceDate ? <p className="text-xs text-destructive">{state.errors.invoiceDate[0]}</p> : null}</div>
             <div className="space-y-2"><Label htmlFor="category">Kategorija</Label><Input id="category" name="category" list="expense-category-suggestions" placeholder="npr. Stavbno pohištvo" minLength={2} maxLength={60} required aria-invalid={Boolean(state.errors?.category)} /><datalist id="expense-category-suggestions">{expenseCategorySuggestions.map((category) => <option key={category} value={category} />)}</datalist>{state.errors?.category ? <p className="text-xs text-destructive">{state.errors.category[0]}</p> : <p className="text-xs text-muted-foreground">Izberi predlog ali vpiši svojo kategorijo.</p>}</div>
             <div className="space-y-2"><Label>Izvajalec</Label><Select name="contractorId" defaultValue="none"><SelectTrigger className="w-full" aria-invalid={Boolean(state.errors?.contractorId)}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Brez izvajalca</SelectItem>{contractors.map((contractor) => <SelectItem key={contractor.id} value={contractor.id}>{contractor.name} · {contractor.trade}</SelectItem>)}</SelectContent></Select>{state.errors?.contractorId ? <p className="text-xs text-destructive">{state.errors.contractorId[0]}</p> : null}</div>
+            <div className="space-y-2"><Label>Vir financiranja</Label><Select name="fundingSourceId" value={fundingSourceId} onValueChange={(next) => setFundingSourceId((next as string | null) ?? fundingSourceId)} itemToStringLabel={(value) => fundingSourceNames[value as string] ?? String(value)}><SelectTrigger className="w-full" aria-invalid={Boolean(state.errors?.fundingSourceId)}><SelectValue /></SelectTrigger><SelectContent>{fundingSources.map((source) => <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>)}</SelectContent></Select>{state.errors?.fundingSourceId ? <p className="text-xs text-destructive">{state.errors.fundingSourceId[0]}</p> : <p className="text-xs text-muted-foreground">Iz katerega denarja se plača račun.</p>}</div>
+            {paidFromOwnFunds ? <div className="space-y-2"><Label>Plačal</Label><Select key={expenseId} name="paidBy" defaultValue={currentUserId} itemToStringLabel={(value) => memberNames[value as string] ?? String(value)}><SelectTrigger className="w-full" aria-invalid={Boolean(state.errors?.paidBy)}><SelectValue placeholder="Izberi osebo" /></SelectTrigger><SelectContent>{members.map((member) => <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>)}</SelectContent></Select>{state.errors?.paidBy ? <p className="text-xs text-destructive">{state.errors.paidBy[0]}</p> : <p className="text-xs text-muted-foreground">Kdo je plačal iz svojega žepa.</p>}</div> : null}
             <div className="space-y-2"><Label>Status</Label><Select name="status" defaultValue="received" itemToStringLabel={(value) => ({ received: "Prejeto", approved: "Odobreno", paid: "Plačano" })[value] ?? value}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="received">Prejeto</SelectItem><SelectItem value="approved">Odobreno</SelectItem><SelectItem value="paid">Plačano</SelectItem></SelectContent></Select></div>
             <div className="space-y-2 sm:col-span-2"><Label htmlFor="note">Opomba</Label><Textarea id="note" name="note" rows={3} placeholder="Kratek kontekst za ostale investitorje" /></div>
           </div>

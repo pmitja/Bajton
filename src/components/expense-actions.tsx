@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { expenseCategorySuggestions } from "@/lib/format";
-import type { ContractorOption, Expense } from "@/lib/types";
+import type { ContractorOption, Expense, FundingSourceOption, MemberOption } from "@/lib/types";
 
 type Draft = {
   vendor: string;
@@ -21,13 +21,15 @@ type Draft = {
   invoiceDate: string;
   category: string;
   contractorId: string;
+  fundingSourceId: string;
+  paidBy: string;
   status: "received" | "approved" | "paid";
   note: string;
 };
 
 const euro = new Intl.NumberFormat("sl-SI", { style: "currency", currency: "EUR" });
 
-function draftFrom(expense: Expense): Draft {
+function draftFrom(expense: Expense, fundingSources: FundingSourceOption[]): Draft {
   const status = expense.statusKey === "approved" || expense.statusKey === "paid" ? expense.statusKey : "received";
   return {
     vendor: expense.vendor,
@@ -35,21 +37,33 @@ function draftFrom(expense: Expense): Draft {
     invoiceDate: expense.invoiceDate,
     category: expense.category,
     contractorId: expense.contractorId ?? "none",
+    fundingSourceId: expense.fundingSourceId ?? fundingSources[0]?.id ?? "",
+    paidBy: expense.paidById ?? "",
     status,
     note: expense.note,
   };
 }
 
-export function ExpenseActions({ expense, contractors }: { expense: Expense; contractors: ContractorOption[] }) {
+type ExpenseActionsProps = {
+  expense: Expense;
+  contractors: ContractorOption[];
+  fundingSources: FundingSourceOption[];
+  members: MemberOption[];
+};
+
+export function ExpenseActions({ expense, contractors, fundingSources, members }: ExpenseActionsProps) {
+  const fundingSourceNames = Object.fromEntries(fundingSources.map((source) => [source.id, source.name]));
+  const memberNames = Object.fromEntries(members.map((member) => [member.id, member.name]));
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [draft, setDraft] = useState(() => draftFrom(expense));
+  const [draft, setDraft] = useState(() => draftFrom(expense, fundingSources));
   const [message, setMessage] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const paidFromOwnFunds = fundingSources.find((source) => source.id === draft.fundingSourceId)?.kind === "own";
 
   function openEditor() {
-    setDraft(draftFrom(expense));
+    setDraft(draftFrom(expense, fundingSources));
     setMessage("");
     setEditing(true);
   }
@@ -136,6 +150,22 @@ export function ExpenseActions({ expense, contractors }: { expense: Expense; con
                   <SelectContent><SelectItem value="received">Prejeto</SelectItem><SelectItem value="approved">Odobreno</SelectItem><SelectItem value="paid">Plačano</SelectItem></SelectContent>
                 </Select>
               </div>
+              <div className={`space-y-2 ${paidFromOwnFunds ? "" : "sm:col-span-2"}`}>
+                <Label>Vir financiranja</Label>
+                <Select value={draft.fundingSourceId} onValueChange={(fundingSourceId) => setDraft((current) => ({ ...current, fundingSourceId: fundingSourceId ?? current.fundingSourceId }))} itemToStringLabel={(value) => fundingSourceNames[value as string] ?? String(value)} disabled={pending}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{fundingSources.map((source) => <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {paidFromOwnFunds ? (
+                <div className="space-y-2">
+                  <Label>Plačal</Label>
+                  <Select value={draft.paidBy || null} onValueChange={(paidBy) => setDraft((current) => ({ ...current, paidBy: (paidBy as string | null) ?? "" }))} itemToStringLabel={(value) => memberNames[value as string] ?? String(value)} disabled={pending}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Izberi osebo" /></SelectTrigger>
+                    <SelectContent>{members.map((member) => <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              ) : null}
               <div className="space-y-2 sm:col-span-2">
                 <Label>Izvajalec</Label>
                 <Select value={draft.contractorId} onValueChange={(contractorId) => setDraft((current) => ({ ...current, contractorId: contractorId ?? "none" }))} disabled={pending}>

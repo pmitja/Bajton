@@ -10,7 +10,7 @@ export default async function AnalyticsPage() {
   const maximum = Math.max(...categories.map((category) => category.amount), 1);
   const paid = data.expenses.filter((expense) => expense.status === "Plačano").reduce((sum, expense) => sum + expense.amount, 0);
   const shownTotal = data.expenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const available = data.project.budget - data.project.committed;
+  const available = data.project.available;
   return <AppShell data={data}><PageContainer title="Analitika" description="Poraba po kategorijah in stanje proračuna."><div className="space-y-5"><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Finančni povzetek">{[
     { label: "Proračun", value: euro.format(data.project.budget), note: "Potrjen načrt" },
     { label: "Dogovorjeno", value: euro.format(data.project.committed), note: `${Math.round(data.project.committed / data.project.budget * 100)} % proračuna` },

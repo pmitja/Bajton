@@ -3,11 +3,12 @@ import "server-only";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { and, asc, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { getSessionUser } from "@/lib/auth";
-import { activityEvents, categories, contractors, expenseAttachments, expenses, payments, projectMembers, projectPhases, projects, tasks, users, vendors } from "@/db/schema";
-import { expenseStatusLabels, formatDueLabel, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
-import type { ActivityItem, Contractor, ContractorOption, CurrentUser, DashboardData, Expense, Investor, MonthlySpending, PhaseItem, ProjectDocument, ProjectSummary, SearchEntry, Task } from "@/lib/types";
+import { activityEvents, categories, contractors, expenseAttachments, expenses, fundingSources, payments, projectMembers, projectPhases, projects, tasks, users, vendors } from "@/db/schema";
+import { expenseStatusLabels, formatDueLabel, fundingSourceKindLabels, formatMoney, formatPhaseDate, formatRelativeTime, formatShortDate, initialsOf, priorityLabels, toNumber } from "@/lib/format";
+import type { ActivityItem, Contractor, ContractorOption, CurrentUser, DashboardData, Expense, FundingSource, Investor, MemberOption, MonthlySpending, PhaseItem, ProjectDocument, ProjectSummary, SearchEntry, Task } from "@/lib/types";
 
 export type ProjectContext = {
   db: ReturnType<typeof getDb>;
@@ -45,7 +46,58 @@ export async function getProjectContext(): Promise<ProjectContext> {
   };
 }
 
-async function getProjectSummary({ db, project }: ProjectContext): Promise<ProjectSummary> {
+/** Viri financiranja s porabo: dogovorjeno (vsi nepreklicani stroški) in plačano. */
+async function getFundingSourcesFor({ db, project }: ProjectContext): Promise<FundingSource[]> {
+  // Drizzle v poizvedbi brez joina izpiše stolpec brez tabele; v podpoizvedbah bi bil "id" dvoumen.
+  const sourceId = sql.raw(`"funding_sources"."id"`);
+  const rows = await db
+    .select({
+      id: fundingSources.id,
+      name: fundingSources.name,
+      kind: fundingSources.kind,
+      amount: fundingSources.amount,
+      committed: sql<string>`(select coalesce(sum(e.gross_amount), 0) from ${expenses} e where e.funding_source_id = ${sourceId} and e.deleted_at is null and e.status <> 'cancelled')`,
+      spent: sql<string>`(select coalesce(sum(p.amount), 0) from ${payments} p join ${expenses} e on e.id = p.expense_id where e.funding_source_id = ${sourceId} and e.deleted_at is null)`,
+      expenseCount: sql<number>`(select count(*)::int from ${expenses} e where e.funding_source_id = ${sourceId} and e.deleted_at is null)`,
+    })
+    .from(fundingSources)
+    .where(and(eq(fundingSources.projectId, project.id), isNull(fundingSources.deletedAt)))
+    .orderBy(asc(fundingSources.kind), asc(fundingSources.sortOrder), asc(fundingSources.createdAt));
+
+  const payerRows = await db
+    .select({
+      fundingSourceId: expenses.fundingSourceId,
+      name: users.name,
+      committed: sql<string>`sum(${expenses.grossAmount})`,
+    })
+    .from(expenses)
+    .innerJoin(users, eq(expenses.paidBy, users.id))
+    .where(and(eq(expenses.projectId, project.id), isNull(expenses.deletedAt), ne(expenses.status, "cancelled")))
+    .groupBy(expenses.fundingSourceId, users.name)
+    .orderBy(desc(sql`sum(${expenses.grossAmount})`));
+
+  return rows.map((row) => {
+    const amount = row.amount === null ? null : toNumber(row.amount);
+    const committed = toNumber(row.committed);
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      kindLabel: fundingSourceKindLabels[row.kind],
+      amount,
+      committed,
+      spent: toNumber(row.spent),
+      remaining: amount === null ? null : amount - committed,
+      expenseCount: row.expenseCount,
+      payers: payerRows
+        .filter((payer) => payer.fundingSourceId === row.id)
+        .map((payer) => ({ name: payer.name, committed: toNumber(payer.committed) })),
+    };
+  });
+}
+
+async function getProjectSummary({ db, project }: ProjectContext, sources: FundingSource[]): Promise<ProjectSummary> {
+  const limited = sources.filter((source) => source.amount !== null);
   const [[committedRow], [spentRow], [progressRow]] = await Promise.all([
     db
       .select({ total: sql<string>`coalesce(sum(${expenses.grossAmount}), 0)` })
@@ -67,14 +119,16 @@ async function getProjectSummary({ db, project }: ProjectContext): Promise<Proje
     name: project.name,
     location: project.location ?? "—",
     currency: project.currency,
-    budget: toNumber(project.totalBudget),
+    budget: limited.reduce((sum, source) => sum + (source.amount ?? 0), 0),
     spent: toNumber(spentRow?.total),
     committed: toNumber(committedRow?.total),
+    available: limited.reduce((sum, source) => sum + (source.remaining ?? 0), 0),
     progress: Math.round(toNumber(progressRow?.average)),
   };
 }
 
 async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> {
+  const payer = alias(users, "payer");
   const rows = await db
     .select({
       id: expenses.id,
@@ -82,6 +136,10 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
       vendor: vendors.name,
       contractorId: expenses.contractorId,
       contractor: contractors.name,
+      fundingSourceId: expenses.fundingSourceId,
+      fundingSource: fundingSources.name,
+      paidById: expenses.paidBy,
+      paidBy: payer.name,
       category: categories.name,
       grossAmount: expenses.grossAmount,
       status: expenses.status,
@@ -95,6 +153,8 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
     .leftJoin(vendors, eq(expenses.vendorId, vendors.id))
     .leftJoin(contractors, eq(expenses.contractorId, contractors.id))
     .leftJoin(categories, eq(expenses.categoryId, categories.id))
+    .leftJoin(fundingSources, eq(expenses.fundingSourceId, fundingSources.id))
+    .leftJoin(payer, eq(expenses.paidBy, payer.id))
     .leftJoin(users, eq(expenses.createdBy, users.id))
     .where(and(eq(expenses.projectId, project.id), isNull(expenses.deletedAt)))
     .orderBy(desc(sql`coalesce(${expenses.invoiceDate}, ${expenses.createdAt}::date)`), desc(expenses.createdAt));
@@ -104,6 +164,10 @@ async function getExpenses({ db, project }: ProjectContext): Promise<Expense[]> 
     vendor: row.vendor ?? row.title,
     contractorId: row.contractorId,
     contractor: row.contractor,
+    fundingSourceId: row.fundingSourceId,
+    fundingSource: row.fundingSource,
+    paidById: row.paidById,
+    paidBy: row.paidBy,
     category: row.category ?? "Nerazporejeno",
     amount: toNumber(row.grossAmount),
     date: formatShortDate(row.invoiceDate ?? row.createdAt),
@@ -177,6 +241,9 @@ function describeEvent(entityType: string, action: string, after: EventPayload) 
   if (entityType === "expense" && action === "paid") return `je plačal(a) račun ${label}`;
   if (entityType === "expense" && action === "updated") return `je posodobil(a) račun ${label}`;
   if (entityType === "expense" && action === "deleted") return `je odstranil(a) strošek ${label}`;
+  if (entityType === "funding_source" && action === "created") return `je dodal(a) vir financiranja ${label}`;
+  if (entityType === "funding_source" && action === "updated") return `je posodobil(a) vir financiranja ${label}`;
+  if (entityType === "funding_source" && action === "deleted") return `je odstranil(a) vir financiranja ${label}`;
   if (entityType === "contractor" && action === "created") return `je dodal(a) izvajalca ${label}`;
   if (entityType === "task" && action === "created") return `je dodal(a) opravilo ${label}`;
   if (entityType === "task" && action === "completed") return `je zaključil(a) opravilo ${label}`;
@@ -257,14 +324,16 @@ async function getMonthlySpending({ db, project }: ProjectContext): Promise<Mont
 
 export async function getDashboardData(): Promise<DashboardData> {
   const context = await getProjectContext();
-  const [project, expenseRows, taskRows, phaseRows, activityRows, monthlySpending, contractorOptions] = await Promise.all([
-    getProjectSummary(context),
+  const fundingSourceRows = await getFundingSourcesFor(context);
+  const [project, expenseRows, taskRows, phaseRows, activityRows, monthlySpending, contractorOptions, memberOptions] = await Promise.all([
+    getProjectSummary(context, fundingSourceRows),
     getExpenses(context),
     getTasks(context),
     getPhases(context),
     getActivity(context),
     getMonthlySpending(context),
     getContractorOptionsFor(context),
+    getMemberOptionsFor(context),
   ]);
 
   return {
@@ -272,6 +341,8 @@ export async function getDashboardData(): Promise<DashboardData> {
     currentUser: context.currentUser,
     expenses: expenseRows,
     contractorOptions,
+    fundingSources: fundingSourceRows,
+    memberOptions,
     tasks: taskRows,
     phases: phaseRows,
     activity: activityRows,
@@ -294,7 +365,7 @@ export async function getSearchIndex(): Promise<SearchEntry[]> {
       id: `expense-${expense.id}`,
       kind: "expense" as const,
       label: expense.vendor,
-      description: `${expense.category}${expense.contractor ? ` · ${expense.contractor}` : ""} · ${formatMoney(expense.amount)} · ${expense.status}`,
+      description: `${expense.category}${expense.contractor ? ` · ${expense.contractor}` : ""}${expense.fundingSource ? ` · ${expense.fundingSource}` : ""}${expense.paidBy ? ` (${expense.paidBy})` : ""} · ${formatMoney(expense.amount)} · ${expense.status}`,
       href: "/expenses",
     })),
     ...taskRows.map((task) => ({
@@ -360,6 +431,15 @@ async function getContractorOptionsFor({ db, project }: ProjectContext): Promise
     .from(contractors)
     .where(and(eq(contractors.projectId, project.id), isNull(contractors.deletedAt)))
     .orderBy(asc(contractors.name));
+}
+
+async function getMemberOptionsFor({ db, project }: ProjectContext): Promise<MemberOption[]> {
+  return db
+    .select({ id: users.id, name: users.name })
+    .from(projectMembers)
+    .innerJoin(users, eq(projectMembers.userId, users.id))
+    .where(eq(projectMembers.projectId, project.id))
+    .orderBy(asc(projectMembers.joinedAt));
 }
 
 export async function getContractors(): Promise<Contractor[]> {

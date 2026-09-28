@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { activityEvents, categories, contractors, expenseAttachments, expenses, payments, projectPhases, tasks, users, vendors } from "@/db/schema";
+import { activityEvents, categories, contractors, expenseAttachments, expenses, fundingSources, payments, projectMembers, projectPhases, tasks, users, vendors } from "@/db/schema";
 import { getProjectContext, type ProjectContext } from "@/db/queries";
 import { expenseStatusLabels, formatDueLabel, formatFileSize, formatShortDate, initialsOf, priorityLabels, priorityValues } from "@/lib/format";
 import { getFileUrl, getUtApi } from "@/lib/utapi";
@@ -25,6 +25,8 @@ const expenseSchema = z.object({
   invoiceDate: z.iso.date("Izberi veljaven datum."),
   category: z.string().trim().min(2, "Vnesi kategorijo.").max(60, "Kategorija je predolga.").transform((value) => value.replace(/\s+/g, " ")),
   contractorId: z.union([z.uuid(), z.literal("none")]).transform((value) => value === "none" ? null : value),
+  fundingSourceId: z.uuid("Izberi vir financiranja."),
+  paidBy: z.union([z.uuid(), z.literal("none"), z.literal("")]).optional().transform((value) => value && value !== "none" ? value : null),
   status: z.enum(["received", "approved", "paid"]),
   note: z.string().trim().max(500, "Opomba je predolga.").optional(),
 });
@@ -67,6 +69,30 @@ async function resolveContractorId({ db, project }: ProjectContext, contractorId
   return contractor?.id;
 }
 
+async function resolveFundingSource({ db, project }: ProjectContext, fundingSourceId: string) {
+  const [source] = await db
+    .select({ id: fundingSources.id, kind: fundingSources.kind })
+    .from(fundingSources)
+    .where(and(eq(fundingSources.id, fundingSourceId), eq(fundingSources.projectId, project.id), isNull(fundingSources.deletedAt)))
+    .limit(1);
+  return source ?? null;
+}
+
+/**
+ * Plačnika beležimo samo pri lastnih sredstvih, kjer je obvezen; pri ostalih
+ * virih ga zavržemo. Vrne `undefined`, če plačnik manjka ali ni član projekta.
+ */
+async function resolvePayer({ db, project }: ProjectContext, kind: string, paidBy: string | null) {
+  if (kind !== "own") return null;
+  if (!paidBy) return undefined;
+  const [member] = await db
+    .select({ id: projectMembers.userId })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, project.id), eq(projectMembers.userId, paidBy)))
+    .limit(1);
+  return member?.id;
+}
+
 async function logActivity(
   { db, project, currentUser }: ProjectContext,
   event: {
@@ -96,6 +122,7 @@ function revalidateProject() {
   revalidatePath("/activity");
   revalidatePath("/contractors");
   revalidatePath("/timeline");
+  revalidatePath("/settings");
 }
 
 export async function createExpense(previousState: ExpenseActionState, formData: FormData): Promise<ExpenseActionState> {
@@ -110,16 +137,26 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     };
   }
 
-  const { expenseId, vendor, amount, invoiceDate, category, contractorId, status, note } = parsed.data;
+  const { expenseId, vendor, amount, invoiceDate, category, contractorId, fundingSourceId, paidBy, status, note } = parsed.data;
   const context = await getProjectContext();
-  const [categoryId, vendorId, selectedContractorId] = await Promise.all([
-    findOrCreateCategory(context, category),
-    findOrCreateVendor(context, vendor),
+  const [selectedContractorId, fundingSource] = await Promise.all([
     resolveContractorId(context, contractorId),
+    resolveFundingSource(context, fundingSourceId),
   ]);
   if (contractorId && !selectedContractorId) {
     return { success: false, message: "Izbrani izvajalec ne obstaja.", revision: previousState.revision, errors: { contractorId: ["Izberi veljavnega izvajalca."] } };
   }
+  if (!fundingSource) {
+    return { success: false, message: "Izbrani vir financiranja ne obstaja.", revision: previousState.revision, errors: { fundingSourceId: ["Izberi veljaven vir financiranja."] } };
+  }
+  const payerId = await resolvePayer(context, fundingSource.kind, paidBy);
+  if (payerId === undefined) {
+    return { success: false, message: "Izberi, kdo je plačal iz lastnih sredstev.", revision: previousState.revision, errors: { paidBy: ["Izberi, kdo je plačal."] } };
+  }
+  const [categoryId, vendorId] = await Promise.all([
+    findOrCreateCategory(context, category),
+    findOrCreateVendor(context, vendor),
+  ]);
 
   const net = Number((amount / (1 + TAX_RATE)).toFixed(2));
   const tax = Number((amount - net).toFixed(2));
@@ -130,6 +167,8 @@ export async function createExpense(previousState: ExpenseActionState, formData:
     categoryId,
     vendorId,
     contractorId: selectedContractorId,
+    fundingSourceId: fundingSource.id,
+    paidBy: payerId,
     title: `${category} – ${vendor}`,
     invoiceDate,
     netAmount: net.toFixed(2),
@@ -206,13 +245,19 @@ export async function updateExpense(expenseId: string, input: ExpenseInput) {
 
   if (!expense) return { success: false, message: "Strošek ne obstaja." } as const;
 
-  const { vendor, amount, invoiceDate, category, contractorId, status, note } = parsed.data;
-  const [categoryId, vendorId, selectedContractorId] = await Promise.all([
-    findOrCreateCategory(context, category),
-    findOrCreateVendor(context, vendor),
+  const { vendor, amount, invoiceDate, category, contractorId, fundingSourceId, paidBy, status, note } = parsed.data;
+  const [selectedContractorId, fundingSource] = await Promise.all([
     resolveContractorId(context, contractorId),
+    resolveFundingSource(context, fundingSourceId),
   ]);
   if (contractorId && !selectedContractorId) return { success: false, message: "Izbrani izvajalec ne obstaja." } as const;
+  if (!fundingSource) return { success: false, message: "Izbrani vir financiranja ne obstaja." } as const;
+  const payerId = await resolvePayer(context, fundingSource.kind, paidBy);
+  if (payerId === undefined) return { success: false, message: "Izberi, kdo je plačal iz lastnih sredstev." } as const;
+  const [categoryId, vendorId] = await Promise.all([
+    findOrCreateCategory(context, category),
+    findOrCreateVendor(context, vendor),
+  ]);
   const net = Number((amount / (1 + TAX_RATE)).toFixed(2));
   const tax = Number((amount - net).toFixed(2));
 
@@ -222,6 +267,8 @@ export async function updateExpense(expenseId: string, input: ExpenseInput) {
       categoryId,
       vendorId,
       contractorId: selectedContractorId,
+      fundingSourceId: fundingSource.id,
+      paidBy: payerId,
       title: `${category} – ${vendor}`,
       invoiceDate,
       netAmount: net.toFixed(2),
@@ -286,6 +333,127 @@ export async function deleteExpense(expenseId: string) {
 
   revalidateProject();
   return { success: true, message: "Strošek je odstranjen." } as const;
+}
+
+const fundingSourceSchema = z.object({
+  name: z.string().trim().min(2, "Vnesi ime vira.").max(60, "Ime vira je predolgo."),
+  kind: z.enum(["loan", "capital", "own"]),
+  // Prazno polje pomeni vir brez zgornje meje.
+  amount: z.string().trim().transform((value) => value === "" ? null : Number(value.replace(",", "."))).pipe(z.number().positive("Znesek mora biti večji od 0.").nullable()),
+});
+
+export type FundingSourceInput = z.input<typeof fundingSourceSchema>;
+
+async function isFundingSourceNameTaken({ db, project }: ProjectContext, name: string, exceptId?: string) {
+  const [existing] = await db
+    .select({ id: fundingSources.id })
+    .from(fundingSources)
+    .where(and(
+      eq(fundingSources.projectId, project.id),
+      sql`lower(${fundingSources.name}) = lower(${name})`,
+      isNull(fundingSources.deletedAt),
+      exceptId ? sql`${fundingSources.id} <> ${exceptId}` : undefined,
+    ))
+    .limit(1);
+  return Boolean(existing);
+}
+
+export async function createFundingSource(input: FundingSourceInput) {
+  const parsed = fundingSourceSchema.safeParse(input);
+  if (!parsed.success) return { success: false, message: z.prettifyError(parsed.error) } as const;
+
+  const context = await getProjectContext();
+  if (await isFundingSourceNameTaken(context, parsed.data.name)) return { success: false, message: "Vir s tem imenom že obstaja." } as const;
+
+  const [last] = await context.db
+    .select({ sortOrder: fundingSources.sortOrder })
+    .from(fundingSources)
+    .where(eq(fundingSources.projectId, context.project.id))
+    .orderBy(desc(fundingSources.sortOrder))
+    .limit(1);
+
+  const [created] = await context.db
+    .insert(fundingSources)
+    .values({
+      projectId: context.project.id,
+      name: parsed.data.name,
+      kind: parsed.data.kind,
+      amount: parsed.data.amount === null ? null : parsed.data.amount.toFixed(2),
+      sortOrder: (last?.sortOrder ?? -1) + 1,
+    })
+    .returning({ id: fundingSources.id });
+
+  await logActivity(context, { entityType: "funding_source", entityId: created.id, action: "created", afterData: { name: parsed.data.name, amount: parsed.data.amount } });
+
+  revalidateProject();
+  return { success: true, message: "Vir financiranja je dodan." } as const;
+}
+
+export async function updateFundingSource(sourceId: string, input: FundingSourceInput) {
+  const parsedId = z.string().uuid().safeParse(sourceId);
+  const parsed = fundingSourceSchema.safeParse(input);
+  if (!parsedId.success) return { success: false, message: "Vira ni bilo mogoče posodobiti." } as const;
+  if (!parsed.success) return { success: false, message: z.prettifyError(parsed.error) } as const;
+
+  const context = await getProjectContext();
+  const [source] = await context.db
+    .select({ id: fundingSources.id, name: fundingSources.name, amount: fundingSources.amount })
+    .from(fundingSources)
+    .where(and(eq(fundingSources.id, parsedId.data), eq(fundingSources.projectId, context.project.id), isNull(fundingSources.deletedAt)))
+    .limit(1);
+  if (!source) return { success: false, message: "Vir financiranja ne obstaja." } as const;
+  if (await isFundingSourceNameTaken(context, parsed.data.name, source.id)) return { success: false, message: "Vir s tem imenom že obstaja." } as const;
+
+  await context.db
+    .update(fundingSources)
+    .set({
+      name: parsed.data.name,
+      kind: parsed.data.kind,
+      amount: parsed.data.amount === null ? null : parsed.data.amount.toFixed(2),
+      updatedAt: new Date(),
+    })
+    .where(eq(fundingSources.id, source.id));
+
+  await logActivity(context, {
+    entityType: "funding_source",
+    entityId: source.id,
+    action: "updated",
+    beforeData: { name: source.name, amount: source.amount === null ? null : Number(source.amount) },
+    afterData: { name: parsed.data.name, amount: parsed.data.amount },
+  });
+
+  revalidateProject();
+  return { success: true, message: "Vir financiranja je posodobljen." } as const;
+}
+
+export async function deleteFundingSource(sourceId: string) {
+  const parsedId = z.string().uuid().safeParse(sourceId);
+  if (!parsedId.success) return { success: false, message: "Vira ni bilo mogoče odstraniti." } as const;
+
+  const context = await getProjectContext();
+  const activeSources = await context.db
+    .select({ id: fundingSources.id, name: fundingSources.name })
+    .from(fundingSources)
+    .where(and(eq(fundingSources.projectId, context.project.id), isNull(fundingSources.deletedAt)));
+  const source = activeSources.find((row) => row.id === parsedId.data);
+  if (!source) return { success: false, message: "Vir financiranja ne obstaja." } as const;
+  if (activeSources.length === 1) return { success: false, message: "Projekt mora imeti vsaj en vir financiranja." } as const;
+
+  const [usage] = await context.db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(expenses)
+    .where(and(eq(expenses.fundingSourceId, source.id), isNull(expenses.deletedAt)));
+  if (usage?.count) return { success: false, message: `Vir je uporabljen pri ${usage.count} stroških. Najprej jih prerazporedi na drug vir.` } as const;
+
+  await context.db
+    .update(fundingSources)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(eq(fundingSources.id, source.id));
+
+  await logActivity(context, { entityType: "funding_source", entityId: source.id, action: "deleted", afterData: { name: source.name } });
+
+  revalidateProject();
+  return { success: true, message: "Vir financiranja je odstranjen." } as const;
 }
 
 export type ContractorActionState = {

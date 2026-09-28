@@ -29,6 +29,20 @@
       "when": 1788537192448,
       "tag": "0003_real_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790590086318,
+      "tag": "0004_amazing_mesmero",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790592396564,
+      "tag": "0005_early_karma",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,12 @@ export const expenseStatusLabels = {
   cancelled: "Preklicano",
 } as const;
 
+export const fundingSourceKindLabels = {
+  loan: "Kredit",
+  capital: "Kapital",
+  own: "Lastna sredstva",
+} as const;
+
 export const expenseCategoryLabels = {
   material: "Material",
   construction: "Konstrukcija",

@@ -28,8 +28,31 @@ export type ProjectSummary = {
   budget: number;
   spent: number;
   committed: number;
+  /** Preostanek po virih z omejitvijo; stroški iz virov brez omejitve ga ne zmanjšujejo. */
+  available: number;
   progress: number;
 };
+
+export type FundingSourceKind = "loan" | "capital" | "own";
+
+export type FundingSource = {
+  id: string;
+  name: string;
+  kind: FundingSourceKind;
+  kindLabel: string;
+  /** NULL pomeni vir brez zgornje meje. */
+  amount: number | null;
+  committed: number;
+  spent: number;
+  remaining: number | null;
+  expenseCount: number;
+  /** Razčlenitev po osebah, ki so plačale iz tega vira (samo lastna sredstva). */
+  payers: { name: string; committed: number }[];
+};
+
+export type FundingSourceOption = Pick<FundingSource, "id" | "name" | "kind">;
+
+export type MemberOption = { id: string; name: string };
 
 export type Task = {
   id: string;
@@ -46,6 +69,10 @@ export type Expense = {
   vendor: string;
   contractorId: string | null;
   contractor: string | null;
+  fundingSourceId: string | null;
+  fundingSource: string | null;
+  paidById: string | null;
+  paidBy: string | null;
   category: string;
   amount: number;
   date: string;
@@ -119,6 +146,8 @@ export type DashboardData = {
   tasks: Task[];
   expenses: Expense[];
   contractorOptions: ContractorOption[];
+  fundingSources: FundingSource[];
+  memberOptions: MemberOption[];
   phases: PhaseItem[];
   activity: ActivityItem[];
   monthlySpending: MonthlySpending[];

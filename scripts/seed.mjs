@@ -25,7 +25,7 @@ const sql = neon(connectionString);
 const reset = process.argv.includes("--reset");
 
 const TABLES = [
-  "activity_events", "expense_attachments", "payments", "expenses", "tasks",
+  "activity_events", "expense_attachments", "payments", "expenses", "funding_sources", "tasks",
   "project_phases", "contractors", "vendors", "categories", "project_members", "projects", "users",
 ];
 
@@ -78,6 +78,17 @@ async function main() {
       returning id, name
     `;
     console.log(`Ustvarjen projekt: ${project.name}`);
+  }
+
+  // Vsak projekt potrebuje vsaj en vir financiranja, sicer stroška ni mogoče shraniti.
+  const [{ count: sourceCount }] = await sql`select count(*)::int as count from funding_sources where project_id = ${project.id} and deleted_at is null`;
+  if (!sourceCount) {
+    await sql`
+      insert into funding_sources (project_id, name, kind, amount, sort_order)
+      select ${project.id}, 'Kredit', 'loan', total_budget, 0 from projects where id = ${project.id}
+    `;
+    await sql`insert into funding_sources (project_id, name, kind, amount, sort_order) values (${project.id}, 'Lastna sredstva', 'own', null, 2)`;
+    console.log("Dodana vira financiranja: Kredit, Lastna sredstva");
   }
 
   for (const user of userDefs) {

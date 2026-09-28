@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AddExpenseSheet } from "./add-expense-sheet";
 import { TaskList } from "./task-list";
-import type { DashboardData, MonthlySpending } from "@/lib/types";
+import type { DashboardData, FundingSource, MonthlySpending } from "@/lib/types";
 import { AppShell } from "@/components/app-shell";
 import { ExpenseActions } from "@/components/expense-actions";
 
@@ -42,11 +42,49 @@ function SpendingChart({ months }: { months: MonthlySpending[] }) {
   );
 }
 
+function percentOf(value: number, total: number) {
+  return total > 0 ? Math.round(value / total * 100) : 0;
+}
+
+function FundingSources({ sources }: { sources: FundingSource[] }) {
+  return (
+    <section className="mt-5 rounded-2xl border bg-card p-5 shadow-sm" aria-labelledby="funding-title">
+      <div className="mb-4 flex items-start justify-between">
+        <div><h2 id="funding-title" className="font-semibold tracking-tight">Viri financiranja</h2><p className="mt-1 text-sm text-muted-foreground">Dogovorjeni stroški po virih</p></div>
+        <Button render={<Link href="/settings" />} nativeButton={false} variant="ghost" size="sm">Uredi vire</Button>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {sources.map((source) => {
+          const over = source.remaining !== null && source.remaining < 0;
+          return (
+            <div key={source.id} className="rounded-xl bg-muted/45 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0"><p className="truncate font-medium">{source.name}</p><p className="text-xs text-muted-foreground">{source.kindLabel}</p></div>
+                <p className="text-right text-sm font-semibold">{euro.format(source.committed)}{source.amount !== null ? <span className="font-normal text-muted-foreground"> / {euro.format(source.amount)}</span> : null}</p>
+              </div>
+              {source.amount !== null ? <Progress value={Math.min(percentOf(source.committed, source.amount), 100)} className="mt-3 h-1.5" /> : null}
+              <p className={`mt-2 text-xs ${over ? "text-destructive" : "text-muted-foreground"}`}>
+                Plačano {euro.format(source.spent)} · {source.remaining === null ? "brez omejitve" : over ? `prekoračeno za ${euro.format(-source.remaining)}` : `še na voljo ${euro.format(source.remaining)}`}
+              </p>
+              {source.payers.length ? (
+                <ul className="mt-3 space-y-1 border-t pt-3 text-sm">
+                  {source.payers.map((payer) => <li key={payer.name} className="flex justify-between gap-3"><span className="text-muted-foreground">{payer.name}</span><span className="font-medium">{euro.format(payer.committed)}</span></li>)}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function Dashboard({ data }: { data: DashboardData }) {
   const { project, expenses, tasks, phases, activity, currentUser, monthlySpending } = data;
   const recentExpenses = expenses.slice(0, 5);
   const activePhaseIndex = phases.findIndex((phase) => phase.status === "active");
-  const available = project.budget - project.committed;
+  const available = project.available;
+  const budgetSources = data.fundingSources.filter((source) => source.amount !== null).map((source) => source.name);
   const shownExpenses = recentExpenses.reduce((sum, expense) => sum + expense.amount, 0);
   const openTaskCount = tasks.filter((task) => !task.completed).length;
   return (
@@ -54,17 +92,19 @@ export function Dashboard({ data }: { data: DashboardData }) {
         <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div><p className="mb-2 text-sm font-medium text-primary">{today.format(new Date()).replace(/^./, (letter) => letter.toLocaleUpperCase("sl"))}</p><h1 className="text-3xl font-bold tracking-[-0.04em] sm:text-4xl">Dobrodošel nazaj, {currentUser.name.split(" ")[0]}.</h1><p className="mt-2 text-muted-foreground">{project.name} je {project.progress} % dokončana. Trenutno je odprtih {openTaskCount} opravil.</p></div>
-            <AddExpenseSheet projectId={project.id} contractors={data.contractorOptions} />
+            <AddExpenseSheet projectId={project.id} contractors={data.contractorOptions} fundingSources={data.fundingSources} members={data.memberOptions} currentUserId={currentUser.id} />
           </div>
 
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Ključne metrike">
             {[
-              { label: "Celotni proračun", value: euro.format(project.budget), note: "Potrjen načrt", icon: WalletCards },
-              { label: "Porabljeno", value: euro.format(project.spent), note: `${Math.round(project.spent/project.budget*100)} % proračuna`, icon: TrendingUp },
+              { label: "Celotni proračun", value: euro.format(project.budget), note: budgetSources.join(" + ") || "Ni virov z omejitvijo", icon: WalletCards },
+              { label: "Porabljeno", value: euro.format(project.spent), note: `${percentOf(project.spent, project.budget)} % proračuna`, icon: TrendingUp },
               { label: "Dogovorjeni stroški", value: euro.format(project.committed), note: "Vključuje odprte ponudbe", icon: ReceiptText },
-              { label: "Še na voljo", value: euro.format(available), note: `${Math.round(available/project.budget*100)} % proračuna`, icon: Activity },
+              { label: "Še na voljo", value: euro.format(available), note: `${percentOf(available, project.budget)} % proračuna`, icon: Activity },
             ].map((metric) => <div key={metric.label} className="rounded-2xl border bg-card p-5 shadow-sm"><div className="mb-4 flex items-start justify-between"><p className="text-sm font-medium text-muted-foreground">{metric.label}</p><span className="grid size-9 place-items-center rounded-lg bg-accent text-accent-foreground"><metric.icon className="size-4" /></span></div><p className="text-2xl font-bold tracking-tight">{metric.value}</p><p className="mt-1 text-xs text-muted-foreground">{metric.note}</p></div>)}
           </section>
+
+          <FundingSources sources={data.fundingSources} />
 
           <div className="mt-5 grid gap-5 xl:grid-cols-[1.55fr_1fr]">
             <section className="rounded-2xl border bg-card p-5 shadow-sm" aria-labelledby="spending-title"><div className="flex items-start justify-between"><div><h2 id="spending-title" className="font-semibold tracking-tight">Poraba skozi čas</h2><p className="mt-1 text-sm text-muted-foreground">Plačila v zadnjih 6 mesecih · skupaj {euro.format(monthlySpending.reduce((sum, month) => sum + month.amount, 0))}</p></div><span className="inline-flex h-7 items-center gap-1 rounded-lg border px-2.5 text-[0.8rem] font-medium">6 mesecev<ChevronDown className="size-3.5" /></span></div><SpendingChart months={monthlySpending} /></section>
@@ -97,10 +137,10 @@ export function Dashboard({ data }: { data: DashboardData }) {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="px-4 py-3.5 text-muted-foreground">{expense.category}</TableCell>
+                      <TableCell className="px-4 py-3.5 text-muted-foreground"><p>{expense.category}</p>{expense.fundingSource ? <p className="text-xs">{expense.fundingSource}{expense.paidBy ? ` · ${expense.paidBy}` : ""}</p> : null}</TableCell>
                       <TableCell className="px-4 py-3.5"><Badge variant="outline" className={expense.status === "Plačano" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{expense.status}</Badge></TableCell>
                       <TableCell className="px-4 py-3.5 text-right font-semibold">{euro.format(expense.amount)}</TableCell>
-                      <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} contractors={data.contractorOptions} /></TableCell>
+                      <TableCell className="px-3 py-3.5"><ExpenseActions expense={expense} contractors={data.contractorOptions} fundingSources={data.fundingSources} members={data.memberOptions} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
